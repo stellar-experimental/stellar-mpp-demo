@@ -406,12 +406,13 @@ function App() {
       switch (command) {
         case "/help":
           addLine("system", "Commands:");
-          addLine("system", "  /open   — Open a payment channel");
-          addLine("system", "  /close  — Close channel and settle on-chain");
-          addLine("system", "  /topup  — Add more credits to the channel");
+          addLine("system", "  /open    — Open a payment channel");
+          addLine("system", "  /close   — Close channel and settle on-chain");
+          addLine("system", "  /topup   — Add more credits to the channel");
           addLine("system", "  /balance — Show channel balance");
-          addLine("system", "  /help   — Show this help");
-          addLine("system", "  (text)  — Send a chat message");
+          addLine("system", "  /github  — View project source on GitHub");
+          addLine("system", "  /help    — Show this help");
+          addLine("system", "  (text)   — Send a chat message");
           break;
 
         case "/open":
@@ -424,6 +425,17 @@ function App() {
 
         case "/topup":
           await handleTopup();
+          break;
+
+        case "/github":
+          window.open(
+            "https://github.com/stellar-experimental/stellar-mpp-demo",
+            "_blank",
+          );
+          addLine(
+            "system",
+            "Opening github.com/stellar-experimental/stellar-mpp-demo",
+          );
           break;
 
         case "/balance":
