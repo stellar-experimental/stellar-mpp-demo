@@ -2,7 +2,7 @@
   "network": "testnet",
   "networkPassphrase": "Test SDF Network ; September 2015",
   "rpcUrl": "https://soroban-testnet.stellar.org",
-  "channelWasmHash": "3f586184c8332c97f610904ebc8e85b8ee41b7fe9debe9cf2bed2af60a94556d",
+  "channelWasmHash": "605c9ea164a36fe771fdbdf38cd99f20ca8c25cbaa6de8ac43bcff72f7397bcf",
   "factoryContractId": "CDT3EF73C25AIENBQMIH2PCMQWEXT4YE73ED5SJIARWF4QROL7N6NJ44",
   "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
   "serverAddress": "GCI2R2NNC36LLEEEPNSWMDSSE4KFZDFJKXNNKH5V6Y6452G7IUMNW2Z4",
