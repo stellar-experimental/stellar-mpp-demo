@@ -107,7 +107,7 @@ export async function* streamTokens(response: Response): AsyncGenerator<StreamEv
         if (data === "[DONE]") continue;
         try {
           const parsed = JSON.parse(data);
-          if (parsed.usage) {
+          if (parsed.usage && parsed.usage.cost !== undefined) {
             yield { type: "usage", usage: parsed.usage };
           } else if (parsed.response) {
             yield { type: "token", text: parsed.response };

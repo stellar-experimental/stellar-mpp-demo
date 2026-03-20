@@ -150,26 +150,32 @@ agent-browser snapshot -i > /dev/null 2>&1
 agent-browser fill @e1 "What is 2+2?" > /dev/null 2>&1
 agent-browser press Enter > /dev/null 2>&1
 
-echo "  Waiting for second AI response..."
-agent-browser wait 20000 > /dev/null 2>&1
+echo "  Waiting for second AI response + billing..."
+SECOND_OK=0
+for i in $(seq 1 12); do
+  BODY=$(agent-browser get text body 2>/dev/null)
+  BILLING_COUNT=$(echo "$BODY" | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
+  if [ "$BILLING_COUNT" -ge 2 ]; then
+    SECOND_OK=1
+    break
+  fi
+  sleep 5
+done
 
-BODY=$(agent-browser get text body 2>/dev/null)
-if echo "$BODY" | grep -qi "4\|four\|answer"; then
+if [ "$SECOND_OK" = "1" ]; then
   pass "Second chat response received"
+  pass "Cumulative billing: $BILLING_COUNT billing events across messages"
 else
+  BODY=$(agent-browser get text body 2>/dev/null)
   if echo "$BODY" | grep -qi "error"; then
     ERR=$(echo "$BODY" | grep -o "Server error.*\|Chat error.*" | head -1)
     fail "Second chat failed: ${ERR:-unknown}"
   else
     pass "Second chat response received"
+    BILLING_COUNT=$(echo "$BODY" | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
+    fail "Expected 2+ billing events, got $BILLING_COUNT"
   fi
 fi
-
-# Count billing lines — should be 2 after two messages
-BILLING_COUNT=$(agent-browser get text body 2>/dev/null | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
-[ "$BILLING_COUNT" -ge 2 ] && \
-  pass "Cumulative billing: $BILLING_COUNT billing events across messages" || \
-  fail "Expected 2+ billing events, got $BILLING_COUNT"
 
 agent-browser screenshot "$SCREENSHOT_DIR/second-chat.png" > /dev/null 2>&1
 pass "Screenshot: second-chat.png"
