@@ -9,8 +9,14 @@
   "routes": [
     { "pattern": "mpp-server.stellar.buzz", "custom_domain": true }
   ],
-  "kv_namespaces": [
-    { "binding": "CHANNEL_STATE", "id": "222b093d31c940ccae9106720fca9306" }
+  "durable_objects": {
+    "bindings": [
+      { "name": "CHANNEL_MANAGER", "class_name": "ChannelManager" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_classes": ["ChannelCloser"] },
+    { "tag": "v2", "renamed_classes": [{ "from": "ChannelCloser", "to": "ChannelManager" }] }
   ],
   "vars": {
     "AI_WORKER_URL": "https://mpp-ai.stellar.buzz",

@@ -83,10 +83,14 @@ export function buildClosePayload(channelId: string) {
   };
 }
 
-/** Parse SSE stream and yield tokens. */
+export type StreamEvent =
+  | { type: 'token'; text: string }
+  | { type: 'usage'; usage: { completion_tokens: number; cost: string; cumulative_amount: string } };
+
+/** Parse SSE stream and yield typed events (tokens + usage). */
 export async function* streamTokens(
   response: Response,
-): AsyncGenerator<string> {
+): AsyncGenerator<StreamEvent> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -102,10 +106,14 @@ export async function* streamTokens(
     for (const line of lines) {
       if (line.startsWith('data: ')) {
         const data = line.slice(6).trim();
-        if (data === '[DONE]') return;
+        if (data === '[DONE]') continue;
         try {
           const parsed = JSON.parse(data);
-          if (parsed.response) yield parsed.response;
+          if (parsed.usage) {
+            yield { type: 'usage', usage: parsed.usage };
+          } else if (parsed.response) {
+            yield { type: 'token', text: parsed.response };
+          }
         } catch {
           // skip malformed lines
         }

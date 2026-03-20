@@ -12,7 +12,8 @@ export const CONFIG = {
   tokenContractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
   serverAddress: 'GCI2R2NNC36LLEEEPNSWMDSSE4KFZDFJKXNNKH5V6Y6452G7IUMNW2Z4',
   deposit: BigInt(10_000_000), // 1 XLM in stroops (1000 credits)
-  costPerMessage: BigInt(1_000_000), // 0.1 XLM in stroops (100 credits)
+  costPerToken: BigInt(10_000),
+  maxCostPerMessage: BigInt(10_000) * BigInt(512), // max 512 tokens per message
   refundWaitingPeriod: 24,
   channelTtlMs: 120_000,
 };

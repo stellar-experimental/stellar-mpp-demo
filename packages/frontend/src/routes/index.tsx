@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Keypair } from '@stellar/stellar-sdk';
 import Header from '../components/Header';
 import Terminal, { type TerminalLine } from '../components/Terminal';
-import { getOrCreateKeypair, fundWallet, clearKeypair } from '../lib/wallet';
+import { getOrCreateKeypair, fundWallet } from '../lib/wallet';
 import { openChannel, prepareCommitment, topUpChannel, getChannelBalance, toHex } from '../lib/stellar';
 import { CONFIG } from '../lib/config';
 import {
@@ -66,26 +66,13 @@ function App() {
         addLine('system', 'Wallet ready on testnet.');
         setWalletReady(true);
       } catch (e) {
-        // Funding failed — create a fresh keypair and try again
-        addLine('system', 'Account invalid, creating fresh wallet...');
-        clearKeypair();
-        const fresh = getOrCreateKeypair();
-        walletRef.current = fresh.keypair;
-        setWalletAddress(fresh.keypair.publicKey());
-        addLine('system', `New wallet: ${fresh.keypair.publicKey()}`);
-        try {
-          await fundWallet(fresh.keypair.publicKey());
-          addLine('system', 'Wallet funded on testnet.');
-          setWalletReady(true);
-        } catch (e2) {
-          addLine('error', `Friendbot failed: ${e2}. Reload to retry.`);
-        }
+        addLine('error', `Funding failed: ${e}. Reload to retry.`);
       }
     };
     init();
   }, [addLine]);
 
-  // Countdown timer
+  // Countdown timer — auto-close when expired
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (!sessionRef.current) return;
@@ -95,9 +82,8 @@ function App() {
       setTimeRemaining(remaining);
       if (remaining <= 0) {
         clearInterval(timerRef.current!);
-        addLine('system', 'Channel expired. Type /open to start a new session.');
-        setChannelId(null);
-        sessionRef.current = null;
+        addLine('system', 'Channel expired. Auto-closing...');
+        handleClose();
       }
     }, 1000);
 
@@ -231,7 +217,7 @@ function App() {
       setTimeRemaining(CONFIG.channelTtlMs / 1000);
 
       addLine('system', `Channel open! ${CONFIG.deposit.toString()} stroops loaded. Timer: 2:00`);
-      addLine('system', 'Type a message to chat (each costs 100 credits).\n');
+      addLine('system', `Type a message to chat (${CONFIG.costPerToken.toString()} stroops per token).\n`);
     } catch (e) {
       addLine('error', `Open failed: ${e}`);
     }
@@ -245,25 +231,30 @@ function App() {
     }
 
     const session = sessionRef.current;
-    const newCumulative = session.cumulativeAmount + CONFIG.costPerMessage;
+    // Pre-authorize: sign for max possible cost
+    const maxAuthorized = session.cumulativeAmount + CONFIG.maxCostPerMessage;
 
-    if (newCumulative > session.deposit) {
-      addLine('system', `Credits exhausted (${session.cumulativeAmount}/${session.deposit} used).`);
-      addLine('system', 'Type /topup to add more credits, or /close to settle.');
-      return;
+    if (maxAuthorized > session.deposit) {
+      const remaining = session.deposit - session.cumulativeAmount;
+      if (remaining < CONFIG.costPerToken) {
+        addLine('system', `Credits exhausted (${session.cumulativeAmount}/${session.deposit} used).`);
+        addLine('system', 'Type /topup to add more credits, or /close to settle.');
+        return;
+      }
     }
 
     setDisabled(true);
     try {
-      // 1. Simulate prepare_commitment
-      const commitmentBytes = await prepareCommitment(session.channelId, newCumulative);
+      // 1. Simulate prepare_commitment for max authorized amount
+      const commitAmount = maxAuthorized > session.deposit ? session.deposit : maxAuthorized;
+      const commitmentBytes = await prepareCommitment(session.channelId, commitAmount);
 
       // 2. Sign with ephemeral key
       const signature = commitmentRef.current.sign(commitmentBytes as Buffer);
       const sigHex = toHex(signature);
 
       // 3. Build credential and send
-      const payload = buildVoucherPayload(session.channelId, newCumulative.toString(), sigHex);
+      const payload = buildVoucherPayload(session.channelId, commitAmount.toString(), sigHex);
       const res = await sendChat(message, session, payload);
 
       if (res.status === 402) {
@@ -279,31 +270,39 @@ function App() {
         return;
       }
 
-      // 4. Stream response with animated credit burn
-      session.cumulativeAmount = newCumulative;
+      // 4. Stream response with animated per-token credit burn
+      const prevBalance = session.deposit - session.cumulativeAmount;
       setStreamingText('');
       let fullResponse = '';
       let tokenCount = 0;
-      const prevBalance = session.deposit - (newCumulative - CONFIG.costPerMessage);
-      const newBalance = session.deposit - newCumulative;
-      const creditDelta = prevBalance - newBalance;
+      let gotUsage = false;
 
-      for await (const token of streamTokens(res)) {
-        fullResponse += token;
-        tokenCount++;
-        setStreamingText(fullResponse);
+      for await (const event of streamTokens(res)) {
+        if (event.type === 'token') {
+          fullResponse += event.text;
+          tokenCount++;
+          setStreamingText(fullResponse);
 
-        // Animate balance: interpolate from prevBalance to newBalance as tokens arrive
-        // Estimate ~100 tokens per response, adjust proportionally
-        const progress = Math.min(tokenCount / 100, 1);
-        const interpolated = prevBalance - BigInt(Math.floor(Number(creditDelta) * progress));
-        setBalance(interpolated);
+          // Animate balance: deduct per-token cost as tokens arrive
+          const spent = BigInt(tokenCount) * CONFIG.costPerToken;
+          setBalance(prevBalance - spent);
+        } else if (event.type === 'usage') {
+          // Server-reported actual cost — set cumulative to actual
+          session.cumulativeAmount = BigInt(event.usage.cumulative_amount);
+          setBalance(session.deposit - session.cumulativeAmount);
+          gotUsage = true;
+          addLine('ai', fullResponse);
+          addLine('system', `[${event.usage.completion_tokens} tokens, ${event.usage.cost} stroops]`);
+        }
       }
 
-      // 5. Finalize — snap to exact new balance
-      setBalance(newBalance);
+      // 5. Fallback if no usage event received
+      if (!gotUsage) {
+        session.cumulativeAmount = commitAmount;
+        setBalance(session.deposit - session.cumulativeAmount);
+        addLine('ai', fullResponse);
+      }
       setStreamingText('');
-      addLine('ai', fullResponse);
     } catch (e) {
       addLine('error', `Chat error: ${e}`);
     }
@@ -323,11 +322,15 @@ function App() {
       const res = await sendChat('', session, payload);
 
       if (res.ok) {
-        const body = await res.json() as { txHash?: string };
-        addLine('system', `Channel settled: ${session.cumulativeAmount} stroops spent.`);
-        if (body.txHash) {
-          addLine('system', `Settlement tx: ${body.txHash}`);
-          addLine('system', `View: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
+        const body = await res.json() as { status?: string; txHash?: string; settledAmount?: string; actualSpend?: string };
+        if (body.status === 'already-settled') {
+          addLine('system', 'Channel already settled by server.');
+        } else {
+          addLine('system', `Channel settled: ${body.settledAmount || session.cumulativeAmount} stroops on-chain (actual spend: ${body.actualSpend || session.cumulativeAmount} stroops).`);
+          if (body.txHash) {
+            addLine('system', `Settlement tx: ${body.txHash}`);
+            addLine('system', `View: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
+          }
         }
       } else {
         const body = await res.json().catch(() => ({ detail: '' })) as { detail?: string };
