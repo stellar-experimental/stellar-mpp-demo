@@ -1,8 +1,8 @@
-[submodule "packages/contract"]
+[submodule "submodules/one-way-channel"]
 	path = submodules/one-way-channel
 	url = https://github.com/stellar-experimental/one-way-channel
 	branch = main
-[submodule "packages/stellar-mpp-sdk"]
+[submodule "submodules/stellar-mpp-sdk"]
 	path = submodules/stellar-mpp-sdk
 	url = https://github.com/stellar-experimental/stellar-mpp-sdk
 	branch = main
