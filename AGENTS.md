@@ -8,10 +8,11 @@ Reference document for building and maintaining this monorepo. Each section cove
 
 | Service | Path | Runtime | Port (dev) | Purpose |
 |---|---|---|---|---|
-| Frontend | `packages/frontend` | Cloudflare Worker (TanStack Start) | 5173 | CLI terminal UI, sessionStorage wallet, commitment signing |
+| Frontend | `packages/frontend` | Cloudflare Worker (TanStack Start) | 3000 | CLI terminal UI, sessionStorage wallet, commitment signing |
 | MPP Server | `packages/mpp-server` | Cloudflare Worker (Hono) | 8787 | HTTP 402 gateway (stellar-mpp-sdk + mppx), channel state, settlement |
 | AI Worker | `packages/ai-worker` | Cloudflare Worker (Hono) | 8788 | Workers AI inference (streaming) |
-| Contract | `packages/contract` | Soroban (Stellar Testnet) | — | On-chain channel open/close/settle |
+| stellar-mpp-sdk | `packages/stellar-mpp-sdk` | Workspace package | — | Stellar payment method for MPP (channel close, charge) |
+| Contract | `packages/contract` | Soroban (Stellar Testnet) | — | On-chain channel open/close/settle (git submodule) |
 
 ---
 
@@ -21,7 +22,7 @@ Reference document for building and maintaining this monorepo. Each section cove
 
 This demo implements a custom `stellar` payment method with `channel` intent. The wire format follows the MPP spec exactly — only the payment method semantics are Stellar-specific.
 
-The server uses `stellar-mpp-sdk` (the official Stellar payment method for `mppx`) to handle challenge creation, credential verification, and settlement. The frontend uses `mppx` for credential serialization.
+The server uses `stellar-mpp-sdk` (a workspace package providing the Stellar payment method for `mppx`) to handle settlement via on-chain `close()`. The server uses `mppx` for challenge creation, credential parsing, and receipt generation. The frontend uses `mppx` for credential serialization.
 
 ### Header Format
 
@@ -57,16 +58,16 @@ Content-Type: text/event-stream
 
 | Action | Fields | When |
 |---|---|---|
-| `open` | `channelId`, `commitmentKey`, `txHash`, `voucher` | First request after channel deployment |
+| `open` | `channelId`, `commitmentKey` | First request after channel deployment |
 | `voucher` | `channelId`, `voucher: { amount, signature }` | Each subsequent chat message |
 | `topup` | `channelId`, `txHash` | After on-chain `top_up()` tx confirms |
-| `close` | `channelId`, `voucher` (final) | User or timer closes channel |
+| `close` | `channelId`, `voucher?` (optional: tighter final commitment) | User or timer closes channel |
 
 ---
 
 ## Contract: one-way-channel
 
-**Source:** Cloned from `stellar-experimental/one-way-channel`
+**Source:** `stellar-experimental/one-way-channel` (git submodule)
 
 ### Lifecycle
 
@@ -85,12 +86,15 @@ Content-Type: text/event-stream
 | Function | Caller | Purpose |
 |---|---|---|
 | `open` (factory) | Frontend (account key) | Deploy + fund a new channel |
-| `close(amount, sig)` | MPP Server | Settle with latest commitment |
+| `settle(amount, sig)` | MPP Server | Withdraw funds without closing the channel |
+| `close(amount, sig)` | MPP Server | Settle with latest commitment and close |
 | `close_start()` | Frontend | Force-close if server unresponsive |
 | `top_up(amount)` | Frontend (account key) | Add funds to existing channel |
 | `refund()` | Frontend | Reclaim after waiting period |
-| `prepare_commitment(amount)` | (reference only) | XDR bytes to sign |
+| `prepare_commitment(amount)` | Frontend, MPP Server (via simulation) | XDR bytes to sign |
 | `balance()` | Anyone | Current balance |
+| `deposited()` | Anyone | Total amount deposited |
+| `withdrawn()` | Anyone | Total amount already withdrawn |
 | `token()` | Anyone | Token contract address |
 | `from()` | Anyone | Funder address |
 | `to()` | Anyone | Recipient address (server verifies this on open) |
@@ -120,11 +124,11 @@ Both the frontend and server obtain commitment bytes by simulating `prepare_comm
 | Output cost | $0.335 / M tokens |
 | Context window | 80,000 tokens |
 | Streaming | SSE (`stream: true`) |
-| Max tokens (hardcoded) | 150 |
+| Max tokens (hardcoded) | 512 |
 
 **System prompt:**
 ```
-You are a helpful assistant in a payment channel demo. Keep responses concise and informative. You are demonstrating that AI services can be paid for using micropayment channels on the Stellar network.
+You are a helpful, knowledgeable assistant. Answer questions clearly and thoroughly. Provide useful detail and examples where appropriate.
 ```
 
 **SSE format from Workers AI:**
@@ -158,28 +162,31 @@ The critical path for zero-latency payments. After channel open, NO further wall
 
 ```
 1. Generate commitment keypair: Keypair.random() → commitmentKeypair
-2. commitmentKeypair.publicKey() becomes commitment_key in channel constructor
+2. toHex(commitmentKeypair.rawPublicKey()) becomes commitment_key in channel constructor
 3. For each message:
-   a. cumulative += 100
-   b. Simulate prepare_commitment(cumulative) on channel contract via Soroban RPC
-   c. bytes = simulation result (authoritative commitment bytes from contract)
-   d. signature = commitmentKeypair.sign(bytes)
-   e. Include { amount: cumulative, signature } in MPP credential
+   a. preAuthAmount = cumulativeAmount + maxCostPerMessage (up to 512 tokens * 10k stroops)
+   b. commitAmount = min(preAuthAmount, deposit) — can't exceed channel deposit
+   c. Simulate prepare_commitment(commitAmount) on channel contract via Soroban RPC
+   d. bytes = simulation result (authoritative commitment bytes from contract)
+   e. signature = commitmentKeypair.sign(bytes)
+   f. Include { amount: commitAmount, signature } in MPP credential as voucher
+   g. After streaming, server reports actual cost; update cumulativeAmount accordingly
 ```
 
 **Commitment bytes via simulation** (using @stellar/stellar-sdk):
 ```js
-import { Contract, TransactionBuilder, SorobanRpc, nativeToScVal } from '@stellar/stellar-sdk';
+import { Contract, TransactionBuilder, Account, nativeToScVal, rpc } from '@stellar/stellar-sdk';
 
-async function getCommitmentBytes(server, account, channelAddress, amount) {
+async function getCommitmentBytes(server, channelAddress, amount, networkPassphrase) {
   const contract = new Contract(channelAddress);
-  const tx = new TransactionBuilder(account, { fee: '0', networkPassphrase })
+  const source = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0');
+  const tx = new TransactionBuilder(source, { fee: '100', networkPassphrase })
     .addOperation(contract.call('prepare_commitment', nativeToScVal(amount, { type: 'i128' })))
     .setTimeout(30)
     .build();
   const sim = await server.simulateTransaction(tx);
-  return SorobanRpc.Api.isSimulationSuccess(sim)
-    ? sim.result.retval.toXDR()
+  return rpc.Api.isSimulationSuccess(sim)
+    ? sim.result.retval.bytes()
     : null;
 }
 ```
@@ -198,7 +205,7 @@ async function getCommitmentBytes(server, account, channelAddress, amount) {
 | `STELLAR_RPC_URL` | Var | Soroban RPC endpoint (testnet) |
 | `STELLAR_NETWORK_PASSPHRASE` | Var | `Test SDF Network ; September 2015` |
 | `TOKEN_CONTRACT_ID` | Var | SAC token contract (native XLM on testnet) |
-| `CHANNEL_STATE` | KV Binding | KV namespace for channel state |
+| `CHANNEL_MANAGER` | Durable Object Binding | Durable Object for per-channel state management |
 | `AI_WORKER_URL` | Var | URL of the AI Worker endpoint |
 
 ### AI Worker (`packages/ai-worker`)
@@ -207,12 +214,8 @@ async function getCommitmentBytes(server, account, channelAddress, amount) {
 | `AI` | AI Binding | Workers AI |
 
 ### Frontend (`packages/frontend`)
-| Name | Type | Description |
-|---|---|---|
-| `VITE_MPP_SERVER_URL` | Build var | MPP Server URL |
-| `VITE_CHANNEL_FACTORY_ID` | Build var | Factory contract address |
-| `VITE_STELLAR_RPC_URL` | Build var | Soroban RPC endpoint |
-| `VITE_TOKEN_CONTRACT_ID` | Build var | Token contract ID |
+
+No environment variables. All configuration is hardcoded in `src/lib/config.ts` (MPP server URL, factory contract ID, token contract ID, network passphrase, etc.). The frontend uses the MPP server's `/rpc` endpoint as a CORS proxy for Soroban RPC calls.
 
 ---
 
@@ -245,7 +248,7 @@ stellar contract deploy --wasm target/wasm32-unknown-unknown/release/channel_fac
 | MPP Homepage | https://mpp.dev |
 | mpp-proxy (Cloudflare) | https://github.com/cloudflare/mpp-proxy |
 | mppx SDK (wevm) | https://github.com/wevm/mppx |
-| stellar-mpp-sdk | https://github.com/stellar-experimental/stellar-mpp-sdk |
+| stellar-mpp-sdk (workspace package, upstream) | https://github.com/stellar-experimental/stellar-mpp-sdk |
 | one-way-channel contract | https://github.com/stellar-experimental/one-way-channel |
 | Cloudflare Workers AI | https://developers.cloudflare.com/workers-ai/ |
 | Stellar Testnet Friendbot | https://friendbot.stellar.org |

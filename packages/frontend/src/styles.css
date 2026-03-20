@@ -1,11 +1,13 @@
 @import "tailwindcss";
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   background: #000;
   color: #e0e0e0;
-  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   font-size: 14px;
   line-height: 1.5;
   height: 100%;
@@ -17,8 +19,13 @@ html, body {
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 .cursor-blink {

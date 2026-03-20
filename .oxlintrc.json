@@ -1,0 +1,9 @@
+{
+  "plugins": ["typescript", "react", "import", "unicorn"],
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    "*.gen.ts",
+    "worker-configuration.d.ts"
+  ]
+}

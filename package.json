@@ -9,8 +9,15 @@
     "dev:ai": "pnpm --filter ai-worker run dev",
     "build": "pnpm --filter './packages/*' run build",
     "deploy": "pnpm --filter ai-worker deploy && pnpm --filter mpp-server deploy && pnpm --filter frontend deploy",
+    "lint": "oxlint packages/ai-worker packages/mpp-server packages/frontend",
+    "lint:fix": "oxlint --fix packages/ai-worker packages/mpp-server packages/frontend",
+    "format": "oxfmt --write packages/ai-worker packages/mpp-server packages/frontend",
+    "format:check": "oxfmt --check packages/ai-worker packages/mpp-server packages/frontend",
+    "typecheck": "pnpm -r --parallel run check:types",
+    "test": "pnpm -r --parallel run test",
     "test:e2e": "bash test/e2e-smoke.sh",
-    "test:e2e:local": "bash test/e2e-smoke.sh http://localhost:3000"
+    "test:e2e:local": "bash test/e2e-smoke.sh http://localhost:3000",
+    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -20,6 +27,8 @@
     ]
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "oxfmt": "^0.41.0",
+    "oxlint": "^1.56.0"
   }
 }

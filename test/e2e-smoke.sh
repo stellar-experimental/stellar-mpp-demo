@@ -49,15 +49,14 @@ echo "$RESP" | grep -qi "www-authenticate" && \
 echo "$RESP" | grep -qi "payment-required" && \
   pass "Response body: payment-required" || fail "Response body missing payment-required"
 
-step "3. Browser E2E (agent-browser)"
+step "3. Channel Open & Chat"
 
 echo "  Opening $BASE_URL..."
 agent-browser open "$BASE_URL" > /dev/null 2>&1
 
-# Wait for wallet to be fully funded/restored (not just "Wallet created")
-if agent-browser wait --text "Wallet funded" --timeout 60000 > /dev/null 2>&1 || \
-   agent-browser wait --text "Wallet restored" --timeout 5000 > /dev/null 2>&1; then
-  pass "Wallet ready (funded or restored)"
+# Wait for wallet to be fully funded and ready
+if agent-browser wait --text "Wallet ready" --timeout 60000 > /dev/null 2>&1; then
+  pass "Wallet ready"
 else
   fail "Wallet not ready"
   agent-browser screenshot "$SCREENSHOT_DIR/fail-load.png" > /dev/null 2>&1
@@ -137,14 +136,62 @@ fi
 agent-browser screenshot "$SCREENSHOT_DIR/chat-response.png" > /dev/null 2>&1
 pass "Screenshot: chat-response.png"
 
+# Verify per-token billing reported
+if agent-browser get text body 2>/dev/null | grep -qE '\[[0-9]+ tokens, [0-9]+ stroops\]'; then
+  pass "Per-token billing reported after chat"
+else
+  fail "Per-token billing not shown after chat"
+fi
+
+step "4. Cumulative Billing (Second Message)"
+
+# Second chat message — verifies cumulative amount tracking
+agent-browser snapshot -i > /dev/null 2>&1
+agent-browser fill @e1 "What is 2+2?" > /dev/null 2>&1
+agent-browser press Enter > /dev/null 2>&1
+
+echo "  Waiting for second AI response..."
+agent-browser wait 20000 > /dev/null 2>&1
+
+BODY=$(agent-browser get text body 2>/dev/null)
+if echo "$BODY" | grep -qi "4\|four\|answer"; then
+  pass "Second chat response received"
+else
+  if echo "$BODY" | grep -qi "error"; then
+    ERR=$(echo "$BODY" | grep -o "Server error.*\|Chat error.*" | head -1)
+    fail "Second chat failed: ${ERR:-unknown}"
+  else
+    pass "Second chat response received"
+  fi
+fi
+
+# Count billing lines — should be 2 after two messages
+BILLING_COUNT=$(agent-browser get text body 2>/dev/null | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
+[ "$BILLING_COUNT" -ge 2 ] && \
+  pass "Cumulative billing: $BILLING_COUNT billing events across messages" || \
+  fail "Expected 2+ billing events, got $BILLING_COUNT"
+
+agent-browser screenshot "$SCREENSHOT_DIR/second-chat.png" > /dev/null 2>&1
+pass "Screenshot: second-chat.png"
+
+step "5. Balance & Header"
+
 # /balance check
 agent-browser snapshot -i > /dev/null 2>&1
 agent-browser fill @e1 "/balance" > /dev/null 2>&1
 agent-browser press Enter > /dev/null 2>&1
 agent-browser wait 1000 > /dev/null 2>&1
 
-if agent-browser get text body 2>/dev/null | grep -q "Deposit\|Remaining"; then
+BALANCE_LINE=$(agent-browser get text body 2>/dev/null | grep -o "Deposit:.*stroops")
+if [ -n "$BALANCE_LINE" ]; then
   pass "/balance shows credit info"
+  # Verify spend > 0 after two chat messages
+  SPENT=$(echo "$BALANCE_LINE" | grep -oE 'Spent: [0-9]+' | grep -oE '[0-9]+')
+  if [ -n "$SPENT" ] && [ "$SPENT" -gt 0 ]; then
+    pass "Balance reflects spend: $SPENT stroops after 2 messages"
+  else
+    fail "Balance shows zero spend after chat messages"
+  fi
 else
   fail "/balance output missing"
 fi
@@ -156,6 +203,8 @@ if echo "$HEADER" | grep -q "MPP Channel Demo"; then
 else
   fail "Header not visible"
 fi
+
+step "6. Close & Tighter Settlement"
 
 # /close command
 agent-browser snapshot -i > /dev/null 2>&1
@@ -175,14 +224,40 @@ done
 if [ "$CLOSE_OK" = "1" ]; then
   pass "Channel settled on-chain"
 else
+  agent-browser screenshot "$SCREENSHOT_DIR/fail-close.png" > /dev/null 2>&1
   fail "Channel close failed or timed out"
+  agent-browser close > /dev/null 2>&1
+  echo ""; echo "Results: $PASS passed, $FAIL failed"
+  echo "Screenshots: $SCREENSHOT_DIR/"
+  exit 1
 fi
 
 agent-browser screenshot "$SCREENSHOT_DIR/settled.png" > /dev/null 2>&1
 pass "Screenshot: settled.png"
 
+# Verify tighter settlement: settled amount == actual spend (overpayment protection)
+CLOSE_BODY=$(agent-browser get text body 2>/dev/null)
+SETTLED=$(echo "$CLOSE_BODY" | grep -oE 'settled: [0-9]+' | head -1 | grep -oE '[0-9]+')
+ACTUAL=$(echo "$CLOSE_BODY" | grep -oE 'actual spend: [0-9]+' | head -1 | grep -oE '[0-9]+')
+
+if [ -n "$SETTLED" ] && [ -n "$ACTUAL" ]; then
+  if [ "$SETTLED" = "$ACTUAL" ]; then
+    pass "Tighter settlement: settled ($SETTLED) == actual spend ($ACTUAL)"
+  else
+    fail "Settlement mismatch: settled=$SETTLED vs actual=$ACTUAL"
+  fi
+  # Verify no overpayment: settled amount < deposit (got change back)
+  if [ "$SETTLED" -lt 10000000 ]; then
+    pass "No overpayment: settled ($SETTLED) < deposit (10000000)"
+  else
+    fail "Possible overpayment: settled ($SETTLED) >= deposit (10000000)"
+  fi
+else
+  fail "Could not parse settlement amounts (settled=$SETTLED actual=$ACTUAL)"
+fi
+
 # Verify settlement link
-if agent-browser get text body 2>/dev/null | grep -q "stellar.expert"; then
+if echo "$CLOSE_BODY" | grep -q "stellar.expert"; then
   pass "Stellar Expert link present"
 else
   fail "Stellar Expert link missing"

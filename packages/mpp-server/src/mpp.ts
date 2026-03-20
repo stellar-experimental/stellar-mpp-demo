@@ -1,4 +1,4 @@
-import { Challenge, Credential, Receipt, Expires } from 'mppx';
+import { Challenge, Credential, Receipt, Expires } from "mppx";
 
 export interface ChallengeConfig {
   secretKey: string;
@@ -15,8 +15,8 @@ export function createChallenge(config: ChallengeConfig) {
   const challenge = Challenge.from({
     secretKey: config.secretKey,
     realm: config.realm,
-    method: 'stellar',
-    intent: 'channel',
+    method: "stellar",
+    intent: "channel",
     request: {
       token: config.tokenContractId,
       recipient: config.serverAddress,
@@ -32,17 +32,14 @@ export function createChallenge(config: ChallengeConfig) {
 
 /** Build a 402 response with the challenge in WWW-Authenticate header. */
 export function paymentRequired(challenge: Challenge.Challenge, detail: string): Response {
-  return new Response(
-    JSON.stringify({ type: 'payment-required', detail }),
-    {
-      status: 402,
-      headers: {
-        'WWW-Authenticate': Challenge.serialize(challenge),
-        'Cache-Control': 'no-store',
-        'Content-Type': 'application/problem+json',
-      },
+  return new Response(JSON.stringify({ type: "payment-required", detail }), {
+    status: 402,
+    headers: {
+      "WWW-Authenticate": Challenge.serialize(challenge),
+      "Cache-Control": "no-store",
+      "Content-Type": "application/problem+json",
     },
-  );
+  });
 }
 
 /** Parse the credential from an incoming request's Authorization header. */
@@ -51,15 +48,12 @@ export function parseCredential(request: Request) {
 }
 
 /** Verify the challenge HMAC matches (confirms we issued this challenge). */
-export function verifyChallenge(
-  challenge: Challenge.Challenge,
-  secretKey: string,
-): boolean {
+export function verifyChallenge(challenge: Challenge.Challenge, secretKey: string): boolean {
   return Challenge.verify(challenge, { secretKey });
 }
 
 export interface CredentialPayload {
-  action: 'open' | 'voucher' | 'topup' | 'close';
+  action: "open" | "voucher" | "topup" | "close";
   channelId: string;
   commitmentKey?: string;
   txHash?: string;
@@ -70,19 +64,16 @@ export interface CredentialPayload {
 }
 
 /** Create a payment receipt and attach it to a response. */
-export function withReceipt(
-  response: Response,
-  reference: string,
-): Response {
+export function withReceipt(response: Response, reference: string): Response {
   const receipt = Receipt.from({
-    method: 'stellar',
+    method: "stellar",
     reference,
-    status: 'success',
+    status: "success",
     timestamp: new Date().toISOString(),
   });
 
   const headers = new Headers(response.headers);
-  headers.set('Payment-Receipt', Receipt.serialize(receipt));
+  headers.set("Payment-Receipt", Receipt.serialize(receipt));
 
   return new Response(response.body, {
     status: response.status,

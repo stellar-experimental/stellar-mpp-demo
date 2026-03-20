@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "check:types": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^14.6.1",
@@ -13,8 +16,9 @@
     "stellar-mpp-sdk": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260317.1",
+    "@types/node": "^25.5.0",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
     "wrangler": "^4.75.0"
   }
 }

@@ -1,193 +1,85 @@
-Welcome to your new TanStack Start app! 
+# MPP Channel Demo
 
-# Getting Started
+A web-based demo showcasing Stellar payment channels via the MPP (Machine Payments Protocol). Users interact with a monochrome CLI-style terminal to open a unidirectional payment channel on Soroban, chat with a Cloudflare AI bot behind an HTTP 402-gated endpoint, and watch their channel credits burn in real-time as tokens stream back.
 
-To run this application:
+## Architecture
+
+```
+Frontend (CLI Terminal) ──HTTP──▶ MPP Server (402 Gateway) ──HTTP──▶ AI Worker (Workers AI)
+        │                                │
+        │ Stellar SDK                    │ Stellar SDK
+        ▼                                ▼
+              Stellar Testnet (Soroban)
+         Channel Factory + Channel Instances
+```
+
+## Monorepo Structure
+
+```
+packages/
+├── frontend/           # CLI terminal web UI (TanStack Start + Cloudflare Workers)
+├── mpp-server/         # MPP protocol gateway with HTTP 402 (Hono + Cloudflare Workers)
+├── ai-worker/          # Cloudflare Workers AI inference (Hono)
+├── stellar-mpp-sdk/    # Stellar payment method for MPP (workspace package)
+└── contract/           # Soroban one-way-channel + factory (Rust, git submodule)
+```
+
+## Getting Started
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-# Building For Production
+This starts all three services concurrently:
+- Frontend: http://localhost:3000
+- MPP Server: http://localhost:8787
+- AI Worker: http://localhost:8788
 
-To build this application for production:
+## How It Works
+
+1. User types `/open` in the terminal
+2. Frontend fetches a 402 challenge from the MPP server
+3. Frontend opens a payment channel on Stellar testnet via the factory contract
+4. User chats freely — each message is paid with an off-chain signed commitment (no on-chain tx)
+5. Tokens stream back via SSE, credits burn per-token in real-time
+6. When done, `/close` settles on-chain: recipient gets paid, remainder refunded
+
+The only on-chain transactions are open, top-up, and close. Everything in between is signed commitments over HTTP.
+
+## Terminal Commands
+
+- `/open` — Open a payment channel and start a session
+- `/close` — Close the channel and settle on-chain
+- `/topup` — Add more credits to the active channel
+- `/balance` — Show current channel balance and spend
+- `/help` — List commands
+- (any text) — Send as a chat message to the AI
+
+## Contract Coverage
+
+This demo exercises the core happy-path of the channel contract: open, off-chain commitments, top-up, and close. Several contract methods are **not** showcased:
+
+### Incremental Settlement (`settle`)
+
+The contract supports withdrawing earned funds on-chain without closing the channel. The recipient calls `settle(amount, sig)` — same signature verification as `close`, but the channel stays open for continued use. This is useful for long-lived channels where the recipient wants to periodically sweep earnings.
+
+### Funder Dispute Resolution (`close_start` + `refund`)
+
+If the recipient/server goes offline, the funder can initiate `close_start()` which begins a waiting period (`refund_waiting_period` ledgers). The recipient can still call `close` during this window. Once the waiting period elapses, the funder calls `refund()` to reclaim the remaining balance. This is the funder's safety net for recovering unspent funds.
+
+### Additional Getters (`from`, `deposited`, `withdrawn`, `refund_waiting_period`)
+
+The contract exposes getters for the funder address, total deposited amount, total withdrawn amount, and the refund waiting period. The demo uses `balance`, `to`, and `token` but not these.
+
+See [packages/contract/README.md](packages/contract/README.md) for the full contract API, state diagram, and security model.
+
+## Deployment
+
+All TypeScript services deploy to Cloudflare Workers:
 
 ```bash
-pnpm build
+pnpm deploy
 ```
 
-## Testing
-
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
-
-```bash
-pnpm test
-```
-
-## Styling
-
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
-
-### Removing Tailwind CSS
-
-If you prefer not to use Tailwind CSS:
-
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `pnpm add @tailwindcss/vite tailwindcss --dev`
-
-
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from "@tanstack/react-router";
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-  
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-  
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+See [SPEC.md](SPEC.md) for the full specification, [AGENTS.md](AGENTS.md) for service reference, and [PLAN.md](PLAN.md) for the implementation plan.

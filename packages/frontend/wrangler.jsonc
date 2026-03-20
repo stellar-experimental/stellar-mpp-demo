@@ -5,7 +5,5 @@
   "compatibility_flags": ["nodejs_compat"],
   "main": "@tanstack/react-start/server-entry",
   "observability": { "enabled": true },
-  "routes": [
-    { "pattern": "mpp.stellar.buzz", "custom_domain": true }
-  ]
+  "routes": [{ "pattern": "mpp.stellar.buzz", "custom_domain": true }],
 }

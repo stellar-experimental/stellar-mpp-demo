@@ -1,11 +1,11 @@
-import { Keypair } from '@stellar/stellar-sdk';
-import { getServer } from './stellar';
+import { Keypair } from "@stellar/stellar-sdk";
+import { getServer } from "./stellar";
 
-const STORAGE_KEY = 'stellar_secret_key';
+const STORAGE_KEY = "stellar_secret_key";
 
 /** Get or create a wallet keypair from sessionStorage. */
 export function getOrCreateKeypair(): { keypair: Keypair; isNew: boolean } {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return { keypair: Keypair.random(), isNew: true };
   }
   const stored = sessionStorage.getItem(STORAGE_KEY);
@@ -19,7 +19,7 @@ export function getOrCreateKeypair(): { keypair: Keypair; isNew: boolean } {
 
 /** Clear the stored keypair (e.g. if funding fails and we want a fresh one). */
 export function clearKeypair(): void {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     sessionStorage.removeItem(STORAGE_KEY);
   }
 }
@@ -43,10 +43,7 @@ export async function fundWallet(publicKey: string): Promise<void> {
   const res = await fetch(`https://friendbot.stellar.org?addr=${publicKey}`);
   if (!res.ok) {
     const body = await res.text();
-    if (
-      body.includes('createAccountAlreadyExist') ||
-      body.includes('already funded')
-    ) {
+    if (body.includes("createAccountAlreadyExist") || body.includes("already funded")) {
       return; // Account exists — friendbot just can't re-fund it
     }
     throw new Error(`Friendbot failed: ${res.status}`);

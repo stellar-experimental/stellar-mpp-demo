@@ -8,7 +8,7 @@
 2. Move existing TanStack Start app into `packages/frontend/`
 3. Scaffold `packages/mpp-server/` — Hono + Cloudflare Worker
 4. Scaffold `packages/ai-worker/` — Hono + Cloudflare Worker with AI binding
-5. Clone `stellar-experimental/one-way-channel` into `packages/contract/`
+5. Add `stellar-experimental/one-way-channel` as a git submodule at `packages/contract/`
 6. Root `package.json` with shared scripts: `dev`, `build`, `deploy`
 7. Verify all three workers run locally with `wrangler dev`
 
@@ -23,7 +23,7 @@
 1. Set up `wrangler.jsonc` with `[ai]` binding
 2. Single Hono route: `POST /generate`
    - Accept `{ messages: [{role, content}], max_tokens? }`
-   - Clamp `max_tokens` to 150 ceiling
+   - Clamp `max_tokens` to 512 ceiling
    - Prepend system prompt
    - Call `env.AI.run("@cf/meta/llama-3.2-3b-instruct", { messages, stream: true, max_tokens })`
    - Return `ReadableStream` as `text/event-stream`
@@ -46,7 +46,7 @@
 7. Create a test channel manually via CLI to validate the full lifecycle:
    - `open` via factory → simulate `prepare_commitment` → sign → `close` → verify settlement
    - Test `top_up` on the opened channel, verify `balance()` reflects new amount
-8. Store deployed addresses in `packages/contract/deployed.json`
+8. Store deployed addresses in `deployed.json` at the repo root
 
 **Deliverable:** Factory contract on testnet. Validated open/sign/close cycle.
 
@@ -57,10 +57,10 @@
 **Goal:** Payment gateway that issues 402 challenges and validates Stellar commitments.
 
 ### 3a: SDK Setup
-1. Install `stellar-mpp-sdk` (vendored from GitHub, pre-built), `mppx`, bump `@stellar/stellar-sdk` to v14
+1. Include `stellar-mpp-sdk` as a workspace package, install `mppx`, use `@stellar/stellar-sdk` v14
 2. Use `mppx` for protocol serialization: `Challenge` (HMAC-bound), `Credential.fromRequest()`, `Receipt`
 3. Use `close()` from `stellar-mpp-sdk/channel/server` for on-chain settlement
-4. Use Cloudflare KV for channel state persistence
+4. Use Cloudflare Durable Objects for per-channel state management (with alarm-based auto-close)
 
 ### 3b: Challenge/Credential Protocol
 1. Implement 402 challenge flow using `mppx`:
@@ -72,16 +72,16 @@
 ### 3c: Channel Verification (Custom Action Dispatch)
 1. On `action: "open"`:
    - Verify channel contract via Soroban RPC simulation: `to()`, `balance()`, `token()` getters
-   - Store channel state in KV
+   - Store channel state in Durable Object, set auto-close alarm at TTL
 2. On `action: "voucher"`:
    - Simulate `prepare_commitment(amount)` to get authoritative commitment bytes
    - Verify ed25519 signature, enforce monotonically increasing cumulative amounts
-   - Proxy to AI Worker via HTTP fetch to `AI_WORKER_URL`, stream response with receipt
+   - Proxy to AI Worker via HTTP fetch to `AI_WORKER_URL`, count tokens in stream, append usage event, record actual spend
 3. On `action: "topup"`:
-   - Verify top-up tx, call `balance()` via simulation, update KV, reset TTL
+   - Call `balance()` via simulation to verify on-chain increase, update Durable Object state, reset TTL and alarm
 4. On `action: "close"`:
    - Use `close()` from `stellar-mpp-sdk/channel/server` to submit Soroban settlement tx
-   - Return settlement receipt to frontend
+   - Clear Durable Object state, return settlement receipt to frontend
 
 **Deliverable:** Fully functional 402 gateway. Curl test: first request → 402, request with valid credential → AI stream.
 
@@ -116,7 +116,7 @@
 
 ### 4c: Chat with MPP
 1. On chat message:
-   - Calculate new cumulative amount = previous + 100
+   - Calculate new pre-authorized amount = cumulative + maxCostPerMessage (up to 512 tokens)
    - Simulate `prepare_commitment(cumulative)` on channel contract via Soroban RPC
    - Sign returned commitment bytes with ephemeral key
    - Encode credential using `Credential.serialize()` from `mppx`
@@ -130,12 +130,12 @@
    - Display settlement result
 
 ### 4d: Edge Cases
-1. Timer expires: frontend sends close, displays settlement
-2. Credits exhausted: prompt "Top up 1000 credits? [y/n]"
-   - On yes: build `top_up(1000)` tx → sign with account key → submit → send `action: "topup"` credential → reset timer → continue
-   - On no: send close, display settlement
-3. Network error during stream: display error, allow retry (same commitment — server should be idempotent for same amount)
-4. Friendbot funding fails: display error, allow retry or generate new keypair
+1. Timer expires: auto-close via Durable Object alarm settles on-chain; frontend cleans up session
+2. Credits exhausted: prompt user to `/topup` or `/close`
+   - `/topup`: build `top_up(deposit)` tx → sign with account key → submit → send `action: "topup"` credential → query on-chain balance → reset timer → continue
+   - `/close`: send close credential, display settlement
+3. Network error during stream: display error, allow retry
+4. Friendbot funding fails: display error, allow retry on reload
 5. Already has open channel: reject `/open`, show existing channel info
 
 **Deliverable:** Full end-to-end demo working locally.
@@ -182,7 +182,7 @@ Phases 1 and 2 can be done in parallel. Phase 3 depends on both. Phase 4 depends
 | Package | Service | Purpose |
 |---|---|---|
 | `hono` | mpp-server, ai-worker | Cloudflare Worker framework |
-| `stellar-mpp-sdk` | mpp-server | Stellar channel payment method for MPP |
+| `stellar-mpp-sdk` | mpp-server (workspace package) | Stellar channel payment method for MPP |
 | `mppx` | mpp-server, frontend | MPP protocol SDK (challenges, credentials, receipts) |
 | `@stellar/stellar-sdk` | mpp-server, frontend | Transaction building, XDR, ed25519 |
 | `@tanstack/react-start` | frontend | SSR React framework |
@@ -198,4 +198,4 @@ Phases 1 and 2 can be done in parallel. Phase 3 depends on both. Phase 4 depends
 | Friendbot rate limiting | Cache funded keypair in sessionStorage; only call Friendbot on first visit |
 | Stellar testnet instability | Graceful error messages, retry logic on tx submission |
 | AI model unavailability | Fallback error message, don't deduct credits on AI failure |
-| Channel state lost (worker restart) | Use KV for durability; on loss, sender can `close_start()` for refund |
+| Channel state lost (worker restart) | Durable Objects persist state; auto-close alarm ensures settlement; on loss, sender can `close_start()` for refund |
