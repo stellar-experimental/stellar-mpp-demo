@@ -125,19 +125,18 @@ agent-browser fill @e1 "say hi" > /dev/null 2>&1
 agent-browser press Enter > /dev/null 2>&1
 
 echo "  Waiting for second AI response..."
-# Wait for a second billing line — use JS to count occurrences
-if agent-browser wait --fn "(document.body.innerText.match(/\\[\\d+ tokens, \\d+ stroops\\]/g)||[]).length >= 2" --timeout 15000 > /dev/null 2>&1; then
+# Wait for second billing line by checking the text splits on "stroops]"
+agent-browser wait --fn "document.body.innerText.split('stroops]').length > 2" --timeout 15000 > /dev/null 2>&1
+BODY=$(agent-browser get text body 2>/dev/null)
+BILLING_COUNT=$(echo "$BODY" | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
+if [ "$BILLING_COUNT" -ge 2 ]; then
   pass "Second chat response received"
-  pass "Cumulative billing: 2+ billing events across messages"
+  pass "Cumulative billing: $BILLING_COUNT billing events across messages"
+elif [ "$BILLING_COUNT" -ge 1 ]; then
+  pass "Second chat response received"
+  fail "Expected 2+ billing events, got $BILLING_COUNT"
 else
-  BODY=$(agent-browser get text body 2>/dev/null)
-  BILLING_COUNT=$(echo "$BODY" | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
-  if [ "$BILLING_COUNT" -ge 1 ]; then
-    pass "Second chat response received"
-    fail "Expected 2+ billing events, got $BILLING_COUNT"
-  else
-    fail "Second chat failed"
-  fi
+  fail "Second chat failed"
 fi
 
 agent-browser screenshot "$SCREENSHOT_DIR/second-chat.png" > /dev/null 2>&1
