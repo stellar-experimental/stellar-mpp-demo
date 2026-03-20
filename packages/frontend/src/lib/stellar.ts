@@ -12,7 +12,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { CONFIG } from "./config.js";
 
-const POLL_ATTEMPTS = 30;
+const POLL_ATTEMPTS = 60;
 const SEND_RETRY_DELAY_MS = 2000;
 
 /** Submit a transaction with status handling and one retry on TRY_AGAIN_LATER. */
