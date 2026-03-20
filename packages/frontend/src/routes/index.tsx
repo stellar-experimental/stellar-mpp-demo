@@ -34,7 +34,7 @@ function newLine(type: TerminalLine["type"], content: string): TerminalLine {
 type RequestState = "idle" | "opening" | "chatting" | "topping-up" | "closing";
 type WalletStatus = "created" | "restored" | null;
 
-const STARTUP_HINT = "Type /help for commands, or /open to start a session.\n";
+const STARTUP_HINT = "Type /wtf for the protocol tour, /help for commands, or /open to start a session.\n";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
