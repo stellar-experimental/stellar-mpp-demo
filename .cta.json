@@ -1,5 +1,5 @@
 {
-  "projectName": "x402-channel-demo",
+  "projectName": "stellar-mpp-demo",
   "mode": "file-router",
   "typescript": true,
   "tailwind": true,

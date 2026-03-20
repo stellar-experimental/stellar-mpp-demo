@@ -1,5 +1,5 @@
 {
-  "name": "mpp-channel-demo",
+  "name": "stellar-mpp-demo",
   "private": true,
   "scripts": {
     "build:sdk": "pnpm --filter stellar-mpp-sdk run build",
@@ -8,7 +8,7 @@
     "dev:server": "pnpm --filter mpp-server run dev",
     "dev:ai": "pnpm --filter ai-worker run dev",
     "build": "pnpm --filter './packages/*' run build",
-    "deploy": "pnpm --filter ai-worker deploy && pnpm --filter mpp-server deploy && pnpm --filter frontend deploy",
+    "deploy": "pnpm --filter ai-worker run deploy && pnpm --filter mpp-server run deploy && pnpm --filter frontend run deploy",
     "lint": "oxlint packages/ai-worker packages/mpp-server packages/frontend",
     "lint:fix": "oxlint --fix packages/ai-worker packages/mpp-server packages/frontend",
     "format": "oxfmt --write packages/ai-worker packages/mpp-server packages/frontend",
