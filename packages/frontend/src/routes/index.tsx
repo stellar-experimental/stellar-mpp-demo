@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useDeferredValue, startTransition } from "react";
 import { Keypair } from "@stellar/stellar-sdk";
 import Header from "../components/Header";
 import Terminal, { type TerminalLine } from "../components/Terminal";
@@ -30,11 +30,17 @@ function newLine(type: TerminalLine["type"], content: string): TerminalLine {
   return { id: lineId++, type, content };
 }
 
+type RequestState = "idle" | "opening" | "chatting" | "topping-up" | "closing";
+
 function App() {
   const [lines, setLines] = useState<TerminalLine[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [input, setInput] = useState("");
   const [disabled, setDisabled] = useState(false);
+  const [requestState, setRequestState] = useState<RequestState>("idle");
+  const [lastUsageTokens, setLastUsageTokens] = useState<number | null>(null);
+  const [lastUsageCost, setLastUsageCost] = useState<string | null>(null);
+  const [lastUsageTurn, setLastUsageTurn] = useState(0);
 
   const [walletReady, setWalletReady] = useState(false);
   const [walletAddress, setWalletAddress] = useState("");
@@ -47,6 +53,8 @@ function App() {
   const commitmentRef = useRef<Keypair | null>(null);
   const sessionRef = useRef<ChannelSession | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const deferredBalance = useDeferredValue(balance);
+  const deferredStreamingText = useDeferredValue(streamingText);
 
   const addLine = useCallback((type: TerminalLine["type"], content: string) => {
     setLines((prev) => [...prev, newLine(type, content)]);
@@ -89,6 +97,7 @@ function App() {
     }
 
     setDisabled(true);
+    setRequestState("opening");
     try {
       // 1. Get a challenge from the server
       addLine("system", "Requesting 402 challenge...");
@@ -100,7 +109,6 @@ function App() {
 
       if (challengeRes.status !== 402) {
         addLine("error", `Expected 402, got ${challengeRes.status}`);
-        setDisabled(false);
         return;
       }
 
@@ -143,7 +151,6 @@ function App() {
           detail = errText;
         }
         addLine("error", `Registration failed: ${detail}`);
-        setDisabled(false);
         return;
       }
 
@@ -180,8 +187,10 @@ function App() {
       );
     } catch (e) {
       addLine("error", `Open failed: ${e}`);
+    } finally {
+      setDisabled(false);
+      setRequestState("idle");
     }
-    setDisabled(false);
   }, [addLine, walletReady]);
 
   const handleTopup = useCallback(async () => {
@@ -191,6 +200,7 @@ function App() {
     }
 
     setDisabled(true);
+    setRequestState("topping-up");
     try {
       const session = sessionRef.current;
       addLine("system", `Topping up ${CONFIG.deposit} stroops...`);
@@ -221,8 +231,10 @@ function App() {
       }
     } catch (e) {
       addLine("error", `Top-up error: ${e}`);
+    } finally {
+      setDisabled(false);
+      setRequestState("idle");
     }
-    setDisabled(false);
   }, [addLine]);
 
   const handleClose = useCallback(async () => {
@@ -232,7 +244,9 @@ function App() {
     }
 
     setDisabled(true);
+    setRequestState("closing");
     addLine("system", "Closing channel...");
+    let shouldClearSession = false;
     try {
       const session = sessionRef.current;
 
@@ -262,6 +276,7 @@ function App() {
         };
         if (body.status === "already-closed") {
           addLine("system", "Channel already closed by server.");
+          shouldClearSession = true;
         } else if (body.status === "closing") {
           addLine(
             "system",
@@ -269,6 +284,7 @@ function App() {
           );
         } else if (body.status === "no-funds") {
           addLine("system", "Channel closed. No charges.");
+          shouldClearSession = true;
         } else if (body.txHash) {
           const closed = body.closedAmount || session.cumulativeAmount.toString();
           const spent = body.actualSpend || session.cumulativeAmount.toString();
@@ -281,8 +297,10 @@ function App() {
             addLine("system", `Channel closed: ${spent} stroops.`);
           }
           addLine("system", `Close tx: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
+          shouldClearSession = true;
         } else {
           addLine("system", "Channel closed.");
+          shouldClearSession = true;
         }
       } else {
         const body = (await res.json().catch(() => ({ detail: "" }))) as { detail?: string };
@@ -292,14 +310,16 @@ function App() {
       addLine("error", `Close error: ${e}`);
     }
 
-    // Clean up regardless
-    sessionRef.current = null;
-    commitmentRef.current = null;
-    setChannelId(null);
-    setBalance(BigInt(0));
-    setDeposit(BigInt(0));
-    setTimeRemaining(0);
+    if (shouldClearSession) {
+      sessionRef.current = null;
+      commitmentRef.current = null;
+      setChannelId(null);
+      setBalance(BigInt(0));
+      setDeposit(BigInt(0));
+      setTimeRemaining(0);
+    }
     setDisabled(false);
+    setRequestState("idle");
   }, [addLine]);
 
   const handleChat = useCallback(
@@ -326,6 +346,7 @@ function App() {
       }
 
       setDisabled(true);
+      setRequestState("chatting");
       try {
         // 1. Simulate prepare_commitment for max authorized amount
         const commitAmount = maxAuthorized > session.deposit ? session.deposit : maxAuthorized;
@@ -342,7 +363,6 @@ function App() {
         if (res.status === 402) {
           const body = (await res.json().catch(() => ({ detail: "" }))) as { detail?: string };
           addLine("error", `Payment rejected: ${body.detail || "verification failed"}`);
-          setDisabled(false);
           return;
         }
 
@@ -351,7 +371,6 @@ function App() {
             detail?: string;
           };
           addLine("error", `Server error: ${body.detail || res.status}`);
-          setDisabled(false);
           return;
         }
 
@@ -367,14 +386,18 @@ function App() {
           if (event.type === "token") {
             fullResponse += event.text;
             tokenCount++;
-            setStreamingText(fullResponse);
-
-            // Animate balance: deduct per-token cost as tokens arrive
             const spent = BigInt(tokenCount) * CONFIG.costPerToken;
-            setBalance(prevBalance - spent);
+            startTransition(() => {
+              setStreamingText(fullResponse);
+              // Animate balance: deduct per-token cost as tokens arrive
+              setBalance(prevBalance - spent);
+            });
           } else if (event.type === "usage") {
             // Server-reported cost is informational only — display it
             gotUsage = true;
+            setLastUsageTokens(event.usage.completion_tokens);
+            setLastUsageCost(event.usage.cost);
+            setLastUsageTurn((prev) => prev + 1);
             addLine("ai", fullResponse);
             addLine(
               "system",
@@ -393,8 +416,10 @@ function App() {
         setStreamingText("");
       } catch (e) {
         addLine("error", `Chat error: ${e}`);
+      } finally {
+        setDisabled(false);
+        setRequestState("idle");
       }
-      setDisabled(false);
     },
     [addLine],
   );
@@ -428,14 +453,8 @@ function App() {
           break;
 
         case "/github":
-          window.open(
-            "https://github.com/stellar-experimental/stellar-mpp-demo",
-            "_blank",
-          );
-          addLine(
-            "system",
-            "Opening github.com/stellar-experimental/stellar-mpp-demo",
-          );
+          window.open("https://github.com/stellar-experimental/stellar-mpp-demo", "_blank");
+          addLine("system", "Opening github.com/stellar-experimental/stellar-mpp-demo");
           break;
 
         case "/balance":
@@ -500,17 +519,21 @@ function App() {
       <Header
         walletAddress={walletAddress}
         channelId={channelId}
-        balance={balance}
+        balance={deferredBalance}
         deposit={deposit}
         timeRemaining={timeRemaining}
       />
       <Terminal
         lines={lines}
-        streamingText={streamingText}
+        streamingText={deferredStreamingText}
         input={input}
         onInputChange={setInput}
         onSubmit={handleSubmit}
         disabled={disabled}
+        requestState={requestState}
+        lastUsageTokens={lastUsageTokens}
+        lastUsageCost={lastUsageCost}
+        lastUsageTurn={lastUsageTurn}
       />
     </>
   );

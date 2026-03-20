@@ -1,4 +1,4 @@
-import { useRef, useEffect, type ReactNode } from "react";
+import { memo, useRef, useEffect, type ReactNode } from "react";
 
 export interface TerminalLine {
   id: number;
@@ -29,15 +29,23 @@ interface TerminalProps {
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   disabled: boolean;
+  requestState: string;
+  lastUsageTokens: number | null;
+  lastUsageCost: string | null;
+  lastUsageTurn: number;
 }
 
-export default function Terminal({
+function Terminal({
   lines,
   streamingText,
   input,
   onInputChange,
   onSubmit,
   disabled,
+  requestState,
+  lastUsageTokens,
+  lastUsageCost,
+  lastUsageTurn,
 }: TerminalProps) {
   const outputRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -69,6 +77,12 @@ export default function Terminal({
     <>
       <div
         ref={outputRef}
+        data-testid="terminal-output"
+        data-request-state={requestState}
+        data-input-ready={disabled ? "false" : "true"}
+        data-last-usage-turn={String(lastUsageTurn)}
+        data-last-usage-tokens={lastUsageTokens === null ? "" : String(lastUsageTokens)}
+        data-last-usage-cost={lastUsageCost ?? ""}
         className="flex-1 min-h-0 overflow-y-auto px-3 py-2 scrollbar-thin"
         onClick={() => {
           const sel = window.getSelection();
@@ -91,6 +105,7 @@ export default function Terminal({
         <span className="text-neutral-500 mr-2">{">"}</span>
         <input
           ref={inputRef}
+          data-testid="terminal-input"
           type="text"
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
@@ -108,3 +123,5 @@ export default function Terminal({
     </>
   );
 }
+
+export default memo(Terminal);

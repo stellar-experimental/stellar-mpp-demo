@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 interface HeaderProps {
   walletAddress: string;
   channelId: string | null;
@@ -14,13 +16,7 @@ function creditBar(balance: bigint, deposit: bigint): string {
   return `[${"▓".repeat(filled)}${"░".repeat(empty)}] ${balance}/${deposit}`;
 }
 
-export default function Header({
-  walletAddress,
-  channelId,
-  balance,
-  deposit,
-  timeRemaining,
-}: HeaderProps) {
+function Header({ walletAddress, channelId, balance, deposit, timeRemaining }: HeaderProps) {
   const mins = Math.floor(timeRemaining / 60);
   const secs = timeRemaining % 60;
   const timer = timeRemaining > 0 ? `${mins}:${secs.toString().padStart(2, "0")}` : "--:--";
@@ -41,3 +37,5 @@ export default function Header({
     </div>
   );
 }
+
+export default memo(Header);
