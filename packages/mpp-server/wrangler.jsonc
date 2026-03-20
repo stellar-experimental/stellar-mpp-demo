@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mpp-channel-server",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-02",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "observability": { "enabled": true },
+  "dev": { "port": 8787, "inspector_port": 9230 },
+  "routes": [
+    { "pattern": "mpp-server.stellar.buzz", "custom_domain": true }
+  ],
+  "kv_namespaces": [
+    { "binding": "CHANNEL_STATE", "id": "222b093d31c940ccae9106720fca9306" }
+  ],
+  "vars": {
+    "AI_WORKER_URL": "https://mpp-ai.stellar.buzz",
+    "SERVER_STELLAR_ADDRESS": "GCI2R2NNC36LLEEEPNSWMDSSE4KFZDFJKXNNKH5V6Y6452G7IUMNW2Z4",
+    "CHANNEL_FACTORY_ID": "CDT3EF73C25AIENBQMIH2PCMQWEXT4YE73ED5SJIARWF4QROL7N6NJ44",
+    "STELLAR_RPC_URL": "https://soroban-rpc.testnet.stellar.gateway.fm",
+    "STELLAR_NETWORK_PASSPHRASE": "Test SDF Network ; September 2015",
+    "TOKEN_CONTRACT_ID": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+  }
+}

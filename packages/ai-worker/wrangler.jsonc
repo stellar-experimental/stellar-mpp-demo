@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mpp-channel-ai",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "dev": { "port": 8788, "inspector_port": 9231 },
+  "routes": [
+    { "pattern": "mpp-ai.stellar.buzz", "custom_domain": true }
+  ],
+  "ai": { "binding": "AI" }
+}
