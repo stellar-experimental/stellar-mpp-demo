@@ -2,6 +2,8 @@
 # E2E Smoke Test for MPP Channel Demo
 # Usage: ./test/e2e-smoke.sh [base_url]
 # Default: https://mpp.stellar.buzz
+# Constraints: total runtime ≤ 5 minutes, no individual wait > 15 seconds
+# (except on-chain tx operations which depend on Stellar ledger close time)
 
 set -e
 
@@ -10,12 +12,23 @@ SCREENSHOT_DIR="/tmp/claude/e2e-$(date +%s)"
 mkdir -p "$SCREENSHOT_DIR"
 PASS=0
 FAIL=0
+MAX_WAIT=15000        # 15s max for non-on-chain waits
+ONCHAIN_WAIT=120000   # 2 min max for on-chain tx (ledger close + polling)
+CLOSE_WAIT=60000      # 1 min max for on-chain close
+
+# Kill the test after 5 minutes
+TIMEOUT_PID=$$
+( sleep 300 && kill -TERM "$TIMEOUT_PID" 2>/dev/null ) &
+WATCHDOG_PID=$!
 
 pass() { echo "  ✅ $1"; PASS=$((PASS + 1)); }
 fail() { echo "  ❌ $1"; FAIL=$((FAIL + 1)); }
 step() { echo ""; echo "━━━ $1 ━━━"; }
 
-cleanup() { agent-browser close > /dev/null 2>&1 || true; }
+cleanup() {
+  kill "$WATCHDOG_PID" 2>/dev/null || true
+  agent-browser close > /dev/null 2>&1 || true
+}
 trap cleanup EXIT
 
 step "1. Services Health Check"
@@ -58,7 +71,7 @@ echo "  Opening $BASE_URL..."
 agent-browser open "$BASE_URL" > /dev/null 2>&1
 
 # Wait for wallet
-if agent-browser wait --text "Wallet ready" --timeout 15000 > /dev/null 2>&1; then
+if agent-browser wait --text "Wallet ready" --timeout $MAX_WAIT > /dev/null 2>&1; then
   pass "Wallet ready"
 else
   fail "Wallet not ready"
@@ -75,13 +88,13 @@ agent-browser press Enter > /dev/null 2>&1
 agent-browser wait --text "/open" --timeout 5000 > /dev/null 2>&1 && \
   pass "/help shows commands" || fail "/help output missing"
 
-# /open command
+# /open command (on-chain tx — uses extended timeout)
 agent-browser snapshot -i > /dev/null 2>&1
 agent-browser fill @e1 "/open" > /dev/null 2>&1
 agent-browser press Enter > /dev/null 2>&1
 
 echo "  Waiting for channel open (on-chain tx)..."
-if agent-browser wait --text "Channel open" --timeout 120000 > /dev/null 2>&1; then
+if agent-browser wait --text "Channel open" --timeout $ONCHAIN_WAIT > /dev/null 2>&1; then
   pass "Channel opened successfully"
 else
   agent-browser screenshot "$SCREENSHOT_DIR/fail-open.png" > /dev/null 2>&1
@@ -96,13 +109,13 @@ fi
 agent-browser screenshot "$SCREENSHOT_DIR/channel-open.png" > /dev/null 2>&1
 pass "Screenshot: channel-open.png"
 
-# Chat message
+# Chat message (short prompt for fast AI response)
 agent-browser snapshot -i > /dev/null 2>&1
 agent-browser fill @e1 "say ok" > /dev/null 2>&1
 agent-browser press Enter > /dev/null 2>&1
 
 echo "  Waiting for AI response..."
-if agent-browser wait --text "tokens," --timeout 15000 > /dev/null 2>&1; then
+if agent-browser wait --text "tokens," --timeout $MAX_WAIT > /dev/null 2>&1; then
   pass "Chat response received with billing"
 else
   fail "Chat response or billing not received"
@@ -125,18 +138,22 @@ agent-browser fill @e1 "say hi" > /dev/null 2>&1
 agent-browser press Enter > /dev/null 2>&1
 
 echo "  Waiting for second AI response..."
-# Wait for second billing line by checking the text splits on "stroops]"
-agent-browser wait --fn "document.body.innerText.split('stroops]').length > 2" --timeout 15000 > /dev/null 2>&1
-BODY=$(agent-browser get text body 2>/dev/null)
-BILLING_COUNT=$(echo "$BODY" | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
-if [ "$BILLING_COUNT" -ge 2 ]; then
+# Wait for second billing line by checking split count on "stroops]"
+if agent-browser wait --fn "document.body.innerText.split('stroops]').length > 2" --timeout $MAX_WAIT > /dev/null 2>&1; then
   pass "Second chat response received"
-  pass "Cumulative billing: $BILLING_COUNT billing events across messages"
-elif [ "$BILLING_COUNT" -ge 1 ]; then
-  pass "Second chat response received"
-  fail "Expected 2+ billing events, got $BILLING_COUNT"
+  pass "Cumulative billing: 2+ billing events across messages"
 else
-  fail "Second chat failed"
+  BODY=$(agent-browser get text body 2>/dev/null)
+  BILLING_COUNT=$(echo "$BODY" | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
+  if [ "$BILLING_COUNT" -ge 2 ]; then
+    pass "Second chat response received"
+    pass "Cumulative billing: $BILLING_COUNT billing events"
+  elif [ "$BILLING_COUNT" -ge 1 ]; then
+    pass "Second chat response received"
+    fail "Expected 2+ billing events, got $BILLING_COUNT"
+  else
+    fail "Second chat failed"
+  fi
 fi
 
 agent-browser screenshot "$SCREENSHOT_DIR/second-chat.png" > /dev/null 2>&1
@@ -176,7 +193,7 @@ agent-browser fill @e1 "/close" > /dev/null 2>&1
 agent-browser press Enter > /dev/null 2>&1
 
 echo "  Waiting for close (on-chain tx)..."
-if agent-browser wait --fn "document.body.innerText.includes('Channel closed') || document.body.innerText.includes('Channel closing')" --timeout 60000 > /dev/null 2>&1; then
+if agent-browser wait --fn "document.body.innerText.includes('Channel closed') || document.body.innerText.includes('Channel closing')" --timeout $CLOSE_WAIT > /dev/null 2>&1; then
   pass "Channel closed on-chain"
 else
   agent-browser screenshot "$SCREENSHOT_DIR/fail-close.png" > /dev/null 2>&1
