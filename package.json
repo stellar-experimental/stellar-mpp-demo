@@ -17,6 +17,7 @@
     "test": "pnpm -r --parallel run test",
     "test:e2e": "bash test/e2e-smoke.sh",
     "test:e2e:local": "bash test/e2e-smoke.sh http://localhost:3000",
+    "test:e2e:channel-lifecycle:local": "bash test/e2e-channel-lifecycle-local.sh",
     "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test"
   },
   "pnpm": {
