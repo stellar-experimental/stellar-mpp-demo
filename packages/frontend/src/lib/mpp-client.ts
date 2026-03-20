@@ -1,5 +1,5 @@
-import { Challenge, Credential } from 'mppx';
-import { CONFIG } from './config.js';
+import { Challenge, Credential } from "mppx";
+import { CONFIG } from "./config.js";
 
 export interface ChannelSession {
   channelId: string;
@@ -18,7 +18,7 @@ export async function sendChat(
   payload: Record<string, unknown>,
 ): Promise<Response> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 
   if (session.challenge && payload) {
@@ -26,11 +26,11 @@ export async function sendChat(
       challenge: session.challenge,
       payload,
     });
-    headers['Authorization'] = Credential.serialize(credential);
+    headers["Authorization"] = Credential.serialize(credential);
   }
 
   return fetch(`${CONFIG.mppServerUrl}/chat`, {
-    method: 'POST',
+    method: "POST",
     headers,
     body: JSON.stringify({ message }),
   });
@@ -42,25 +42,18 @@ export function parseChallenge(response: Response): Challenge.Challenge {
 }
 
 /** Build a voucher credential payload. */
-export function buildVoucherPayload(
-  channelId: string,
-  amount: string,
-  signatureHex: string,
-) {
+export function buildVoucherPayload(channelId: string, amount: string, signatureHex: string) {
   return {
-    action: 'voucher' as const,
+    action: "voucher" as const,
     channelId,
     voucher: { amount, signature: signatureHex },
   };
 }
 
 /** Build an open credential payload. */
-export function buildOpenPayload(
-  channelId: string,
-  commitmentKeyHex: string,
-) {
+export function buildOpenPayload(channelId: string, commitmentKeyHex: string) {
   return {
-    action: 'open' as const,
+    action: "open" as const,
     channelId,
     commitmentKey: commitmentKeyHex,
   };
@@ -69,50 +62,55 @@ export function buildOpenPayload(
 /** Build a topup credential payload. */
 export function buildTopupPayload(channelId: string, txHash: string) {
   return {
-    action: 'topup' as const,
+    action: "topup" as const,
     channelId,
     txHash,
   };
 }
 
 /** Build a close credential payload. */
-export function buildClosePayload(channelId: string) {
+export function buildClosePayload(
+  channelId: string,
+  voucher?: { amount: string; signature: string },
+) {
   return {
-    action: 'close' as const,
+    action: "close" as const,
     channelId,
+    voucher,
   };
 }
 
 export type StreamEvent =
-  | { type: 'token'; text: string }
-  | { type: 'usage'; usage: { completion_tokens: number; cost: string; cumulative_amount: string } };
+  | { type: "token"; text: string }
+  | {
+      type: "usage";
+      usage: { completion_tokens: number; cost: string; cumulative_amount: string };
+    };
 
 /** Parse SSE stream and yield typed events (tokens + usage). */
-export async function* streamTokens(
-  response: Response,
-): AsyncGenerator<StreamEvent> {
+export async function* streamTokens(response: Response): AsyncGenerator<StreamEvent> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
-  let buffer = '';
+  let buffer = "";
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
+    const lines = buffer.split("\n");
     buffer = lines.pop()!;
 
     for (const line of lines) {
-      if (line.startsWith('data: ')) {
+      if (line.startsWith("data: ")) {
         const data = line.slice(6).trim();
-        if (data === '[DONE]') continue;
+        if (data === "[DONE]") continue;
         try {
           const parsed = JSON.parse(data);
           if (parsed.usage) {
-            yield { type: 'usage', usage: parsed.usage };
+            yield { type: "usage", usage: parsed.usage };
           } else if (parsed.response) {
-            yield { type: 'token', text: parsed.response };
+            yield { type: "token", text: parsed.response };
           }
         } catch {
           // skip malformed lines

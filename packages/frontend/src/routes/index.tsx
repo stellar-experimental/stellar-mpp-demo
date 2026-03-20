@@ -1,11 +1,17 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Keypair } from '@stellar/stellar-sdk';
-import Header from '../components/Header';
-import Terminal, { type TerminalLine } from '../components/Terminal';
-import { getOrCreateKeypair, fundWallet } from '../lib/wallet';
-import { openChannel, prepareCommitment, topUpChannel, getChannelBalance, toHex } from '../lib/stellar';
-import { CONFIG } from '../lib/config';
+import { createFileRoute } from "@tanstack/react-router";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Keypair } from "@stellar/stellar-sdk";
+import Header from "../components/Header";
+import Terminal, { type TerminalLine } from "../components/Terminal";
+import { getOrCreateKeypair, fundWallet } from "../lib/wallet";
+import {
+  openChannel,
+  prepareCommitment,
+  topUpChannel,
+  getChannelBalance,
+  toHex,
+} from "../lib/stellar";
+import { CONFIG } from "../lib/config";
 import {
   sendChat,
   parseChallenge,
@@ -15,23 +21,23 @@ import {
   buildTopupPayload,
   buildClosePayload,
   type ChannelSession,
-} from '../lib/mpp-client';
+} from "../lib/mpp-client";
 
-export const Route = createFileRoute('/')({ component: App });
+export const Route = createFileRoute("/")({ component: App });
 
 let lineId = 0;
-function newLine(type: TerminalLine['type'], content: string): TerminalLine {
+function newLine(type: TerminalLine["type"], content: string): TerminalLine {
   return { id: lineId++, type, content };
 }
 
 function App() {
   const [lines, setLines] = useState<TerminalLine[]>([]);
-  const [streamingText, setStreamingText] = useState('');
-  const [input, setInput] = useState('');
+  const [streamingText, setStreamingText] = useState("");
+  const [input, setInput] = useState("");
   const [disabled, setDisabled] = useState(false);
 
   const [walletReady, setWalletReady] = useState(false);
-  const [walletAddress, setWalletAddress] = useState('');
+  const [walletAddress, setWalletAddress] = useState("");
   const [channelId, setChannelId] = useState<string | null>(null);
   const [balance, setBalance] = useState(BigInt(0));
   const [deposit, setDeposit] = useState(BigInt(0));
@@ -42,139 +48,64 @@ function App() {
   const sessionRef = useRef<ChannelSession | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const addLine = useCallback((type: TerminalLine['type'], content: string) => {
+  const addLine = useCallback((type: TerminalLine["type"], content: string) => {
     setLines((prev) => [...prev, newLine(type, content)]);
   }, []);
 
   // Initialize wallet on mount (client-side only)
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     const init = async () => {
-      addLine('system', 'MPP Channel Demo — Stellar Payment Channels via HTTP 402');
-      addLine('system', 'Type /help for commands, or /open to start a session.\n');
+      addLine("system", "MPP Channel Demo — Stellar Payment Channels via HTTP 402");
+      addLine("system", "Type /help for commands, or /open to start a session.\n");
 
       const { keypair, isNew } = getOrCreateKeypair();
       walletRef.current = keypair;
       setWalletAddress(keypair.publicKey());
 
-      addLine('system', `Wallet ${isNew ? 'created' : 'restored'}: ${keypair.publicKey()}`);
-      addLine('system', 'Ensuring account is funded...');
+      addLine("system", `Wallet ${isNew ? "created" : "restored"}: ${keypair.publicKey()}`);
+      addLine("system", "Ensuring account is funded...");
 
       try {
         await fundWallet(keypair.publicKey());
-        addLine('system', 'Wallet ready on testnet.');
+        addLine("system", "Wallet ready on testnet.");
         setWalletReady(true);
       } catch (e) {
-        addLine('error', `Funding failed: ${e}. Reload to retry.`);
+        addLine("error", `Funding failed: ${e}. Reload to retry.`);
       }
     };
     init();
   }, [addLine]);
 
-  // Countdown timer — auto-close when expired
-  useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (!sessionRef.current) return;
-
-    timerRef.current = setInterval(() => {
-      const remaining = Math.max(0, Math.floor((sessionRef.current!.expiresAt - Date.now()) / 1000));
-      setTimeRemaining(remaining);
-      if (remaining <= 0) {
-        clearInterval(timerRef.current!);
-        addLine('system', 'Channel expired. Auto-closing...');
-        handleClose();
-      }
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [channelId, addLine]);
-
-  const handleSubmit = useCallback(async () => {
-    const text = input.trim();
-    if (!text) return;
-    setInput('');
-    addLine('user', text);
-
-    if (text.startsWith('/')) {
-      await handleCommand(text);
-    } else {
-      await handleChat(text);
-    }
-  }, [input]);
-
-  async function handleCommand(cmd: string) {
-    const command = cmd.toLowerCase().split(' ')[0];
-
-    switch (command) {
-      case '/help':
-        addLine('system', 'Commands:');
-        addLine('system', '  /open   — Open a payment channel');
-        addLine('system', '  /close  — Close channel and settle on-chain');
-        addLine('system', '  /topup  — Add more credits to the channel');
-        addLine('system', '  /balance — Show channel balance');
-        addLine('system', '  /help   — Show this help');
-        addLine('system', '  (text)  — Send a chat message');
-        break;
-
-      case '/open':
-        await handleOpen();
-        break;
-
-      case '/close':
-        await handleClose();
-        break;
-
-      case '/topup':
-        await handleTopup();
-        break;
-
-      case '/balance':
-        if (!sessionRef.current) {
-          addLine('system', 'No active channel. Type /open to start.');
-        } else {
-          const dep = sessionRef.current.deposit;
-          const sp = sessionRef.current.cumulativeAmount;
-          const rem = dep - sp;
-          addLine('system', `Deposit: ${dep} stroops | Spent: ${sp} stroops | Remaining: ${rem} stroops`);
-        }
-        break;
-
-      default:
-        addLine('error', `Unknown command: ${command}. Type /help for commands.`);
-    }
-  }
-
-  async function handleOpen() {
+  const handleOpen = useCallback(async () => {
     if (sessionRef.current) {
-      addLine('error', 'Channel already open. /close it first.');
+      addLine("error", "Channel already open. /close it first.");
       return;
     }
     if (!walletRef.current || !walletReady) {
-      addLine('system', 'Wallet still initializing, please wait...');
+      addLine("system", "Wallet still initializing, please wait...");
       return;
     }
 
     setDisabled(true);
     try {
       // 1. Get a challenge from the server
-      addLine('system', 'Requesting 402 challenge...');
+      addLine("system", "Requesting 402 challenge...");
       const challengeRes = await fetch(`${CONFIG.mppServerUrl}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: '' }),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "" }),
       });
 
       if (challengeRes.status !== 402) {
-        addLine('error', `Expected 402, got ${challengeRes.status}`);
+        addLine("error", `Expected 402, got ${challengeRes.status}`);
         setDisabled(false);
         return;
       }
 
       const challenge = parseChallenge(challengeRes);
-      addLine('system', 'Challenge received. Opening channel on Stellar...');
+      addLine("system", "Challenge received. Opening channel on Stellar...");
 
       // 2. Generate ephemeral commitment keypair
       const commitmentKp = Keypair.random();
@@ -182,20 +113,32 @@ function App() {
 
       // 3. Open channel on-chain via factory
       const chanId = await openChannel(walletRef.current, commitmentKp);
-      addLine('system', `Channel deployed: ${chanId}`);
+      addLine("system", `Channel deployed: ${chanId}`);
 
       // 4. Register channel with the server
-      addLine('system', 'Registering channel with MPP server...');
+      addLine("system", "Registering channel with MPP server...");
       const commitmentKeyHex = toHex(commitmentKp.rawPublicKey());
       const openPayload = buildOpenPayload(chanId, commitmentKeyHex);
-      const tempSession = { channelId: chanId, commitmentKeyHex, cumulativeAmount: BigInt(0), deposit: CONFIG.deposit, challenge, openedAt: Date.now(), expiresAt: Date.now() + CONFIG.channelTtlMs };
+      const tempSession = {
+        channelId: chanId,
+        commitmentKeyHex,
+        cumulativeAmount: BigInt(0),
+        deposit: CONFIG.deposit,
+        challenge,
+        openedAt: Date.now(),
+        expiresAt: Date.now() + CONFIG.channelTtlMs,
+      };
 
-      const regRes = await sendChat('', tempSession, openPayload);
+      const regRes = await sendChat("", tempSession, openPayload);
       if (!regRes.ok) {
         const errText = await regRes.text().catch(() => `${regRes.status}`);
         let detail: string;
-        try { detail = (JSON.parse(errText) as { detail?: string }).detail || errText; } catch { detail = errText; }
-        addLine('error', `Registration failed: ${detail}`);
+        try {
+          detail = (JSON.parse(errText) as { detail?: string }).detail || errText;
+        } catch {
+          detail = errText;
+        }
+        addLine("error", `Registration failed: ${detail}`);
         setDisabled(false);
         return;
       }
@@ -216,128 +159,107 @@ function App() {
       setDeposit(CONFIG.deposit);
       setTimeRemaining(CONFIG.channelTtlMs / 1000);
 
-      addLine('system', `Channel open! ${CONFIG.deposit.toString()} stroops loaded. Timer: 2:00`);
-      addLine('system', `Type a message to chat (${CONFIG.costPerToken.toString()} stroops per token).\n`);
+      addLine("system", `Channel open! ${CONFIG.deposit.toString()} stroops loaded. Timer: 2:00`);
+      addLine(
+        "system",
+        `Type a message to chat (${CONFIG.costPerToken.toString()} stroops per token).\n`,
+      );
     } catch (e) {
-      addLine('error', `Open failed: ${e}`);
+      addLine("error", `Open failed: ${e}`);
     }
     setDisabled(false);
-  }
+  }, [addLine, walletReady]);
 
-  async function handleChat(message: string) {
-    if (!sessionRef.current || !commitmentRef.current) {
-      addLine('system', 'No active channel. Type /open first.');
-      return;
-    }
-
-    const session = sessionRef.current;
-    // Pre-authorize: sign for max possible cost
-    const maxAuthorized = session.cumulativeAmount + CONFIG.maxCostPerMessage;
-
-    if (maxAuthorized > session.deposit) {
-      const remaining = session.deposit - session.cumulativeAmount;
-      if (remaining < CONFIG.costPerToken) {
-        addLine('system', `Credits exhausted (${session.cumulativeAmount}/${session.deposit} used).`);
-        addLine('system', 'Type /topup to add more credits, or /close to settle.');
-        return;
-      }
-    }
-
-    setDisabled(true);
-    try {
-      // 1. Simulate prepare_commitment for max authorized amount
-      const commitAmount = maxAuthorized > session.deposit ? session.deposit : maxAuthorized;
-      const commitmentBytes = await prepareCommitment(session.channelId, commitAmount);
-
-      // 2. Sign with ephemeral key
-      const signature = commitmentRef.current.sign(commitmentBytes as Buffer);
-      const sigHex = toHex(signature);
-
-      // 3. Build credential and send
-      const payload = buildVoucherPayload(session.channelId, commitAmount.toString(), sigHex);
-      const res = await sendChat(message, session, payload);
-
-      if (res.status === 402) {
-        addLine('error', 'Server returned 402. Challenge may have expired. Try /open again.');
-        setDisabled(false);
-        return;
-      }
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: res.statusText })) as { detail?: string };
-        addLine('error', `Server error: ${body.detail || res.status}`);
-        setDisabled(false);
-        return;
-      }
-
-      // 4. Stream response with animated per-token credit burn
-      const prevBalance = session.deposit - session.cumulativeAmount;
-      setStreamingText('');
-      let fullResponse = '';
-      let tokenCount = 0;
-      let gotUsage = false;
-
-      for await (const event of streamTokens(res)) {
-        if (event.type === 'token') {
-          fullResponse += event.text;
-          tokenCount++;
-          setStreamingText(fullResponse);
-
-          // Animate balance: deduct per-token cost as tokens arrive
-          const spent = BigInt(tokenCount) * CONFIG.costPerToken;
-          setBalance(prevBalance - spent);
-        } else if (event.type === 'usage') {
-          // Server-reported actual cost — set cumulative to actual
-          session.cumulativeAmount = BigInt(event.usage.cumulative_amount);
-          setBalance(session.deposit - session.cumulativeAmount);
-          gotUsage = true;
-          addLine('ai', fullResponse);
-          addLine('system', `[${event.usage.completion_tokens} tokens, ${event.usage.cost} stroops]`);
-        }
-      }
-
-      // 5. Fallback if no usage event received
-      if (!gotUsage) {
-        session.cumulativeAmount = commitAmount;
-        setBalance(session.deposit - session.cumulativeAmount);
-        addLine('ai', fullResponse);
-      }
-      setStreamingText('');
-    } catch (e) {
-      addLine('error', `Chat error: ${e}`);
-    }
-    setDisabled(false);
-  }
-
-  async function handleClose() {
-    if (!sessionRef.current) {
-      addLine('system', 'No active channel to close.');
+  const handleTopup = useCallback(async () => {
+    if (!sessionRef.current || !walletRef.current) {
+      addLine("system", "No active channel. Type /open first.");
       return;
     }
 
     setDisabled(true);
     try {
       const session = sessionRef.current;
-      const payload = buildClosePayload(session.channelId);
-      const res = await sendChat('', session, payload);
+      addLine("system", `Topping up ${CONFIG.deposit} stroops...`);
+
+      // 1. Submit top_up tx on-chain
+      const txHash = await topUpChannel(walletRef.current, session.channelId, CONFIG.deposit);
+      addLine("system", `Top-up tx submitted: ${txHash}`);
+
+      // 2. Notify server
+      const payload = buildTopupPayload(session.channelId, txHash);
+      const res = await sendChat("", session, payload);
 
       if (res.ok) {
-        const body = await res.json() as { status?: string; txHash?: string; settledAmount?: string; actualSpend?: string };
-        if (body.status === 'already-settled') {
-          addLine('system', 'Channel already settled by server.');
+        // Update session
+        const newBalance = await getChannelBalance(session.channelId);
+        session.deposit = newBalance;
+        session.expiresAt = Date.now() + CONFIG.channelTtlMs;
+        setDeposit(newBalance);
+        setBalance(newBalance - session.cumulativeAmount);
+        setTimeRemaining(CONFIG.channelTtlMs / 1000);
+        addLine("system", `Topped up! New balance: ${newBalance} stroops. Timer reset.`);
+      } else {
+        const body = (await res.json().catch(() => ({}))) as { detail?: string };
+        addLine("error", `Server rejected top-up: ${body.detail || res.status}`);
+      }
+    } catch (e) {
+      addLine("error", `Top-up error: ${e}`);
+    }
+    setDisabled(false);
+  }, [addLine]);
+
+  const handleClose = useCallback(async () => {
+    if (!sessionRef.current) {
+      addLine("system", "No active channel to close.");
+      return;
+    }
+
+    setDisabled(true);
+    try {
+      const session = sessionRef.current;
+
+      // Sign a final commitment for exact actual spend to avoid overpay
+      let voucher: { amount: string; signature: string } | undefined;
+      if (session.cumulativeAmount > 0n && commitmentRef.current) {
+        const commitmentBytes = await prepareCommitment(
+          session.channelId,
+          session.cumulativeAmount,
+        );
+        const signature = commitmentRef.current.sign(commitmentBytes as Buffer);
+        voucher = {
+          amount: session.cumulativeAmount.toString(),
+          signature: toHex(signature),
+        };
+      }
+
+      const payload = buildClosePayload(session.channelId, voucher);
+      const res = await sendChat("", session, payload);
+
+      if (res.ok) {
+        const body = (await res.json()) as {
+          status?: string;
+          txHash?: string;
+          settledAmount?: string;
+          actualSpend?: string;
+        };
+        if (body.status === "already-settled") {
+          addLine("system", "Channel already settled by server.");
         } else {
-          addLine('system', `Channel settled: ${body.settledAmount || session.cumulativeAmount} stroops on-chain (actual spend: ${body.actualSpend || session.cumulativeAmount} stroops).`);
+          addLine(
+            "system",
+            `Channel settled: ${body.settledAmount || session.cumulativeAmount} stroops on-chain (actual spend: ${body.actualSpend || session.cumulativeAmount} stroops).`,
+          );
           if (body.txHash) {
-            addLine('system', `Settlement tx: ${body.txHash}`);
-            addLine('system', `View: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
+            addLine("system", `Settlement tx: ${body.txHash}`);
+            addLine("system", `View: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
           }
         }
       } else {
-        const body = await res.json().catch(() => ({ detail: '' })) as { detail?: string };
-        addLine('error', `Close failed: ${body.detail || res.status}`);
+        const body = (await res.json().catch(() => ({ detail: "" }))) as { detail?: string };
+        addLine("error", `Close failed: ${body.detail || res.status}`);
       }
     } catch (e) {
-      addLine('error', `Close error: ${e}`);
+      addLine("error", `Close error: ${e}`);
     }
 
     // Clean up regardless
@@ -348,45 +270,187 @@ function App() {
     setDeposit(BigInt(0));
     setTimeRemaining(0);
     setDisabled(false);
-  }
+  }, [addLine]);
 
-  async function handleTopup() {
-    if (!sessionRef.current || !walletRef.current) {
-      addLine('system', 'No active channel. Type /open first.');
-      return;
-    }
-
-    setDisabled(true);
-    try {
-      const session = sessionRef.current;
-      addLine('system', `Topping up ${CONFIG.deposit} stroops...`);
-
-      // 1. Submit top_up tx on-chain
-      const txHash = await topUpChannel(walletRef.current, session.channelId, CONFIG.deposit);
-      addLine('system', `Top-up tx submitted: ${txHash}`);
-
-      // 2. Notify server
-      const payload = buildTopupPayload(session.channelId, txHash);
-      const res = await sendChat('', session, payload);
-
-      if (res.ok) {
-        // Update session
-        const newBalance = await getChannelBalance(session.channelId);
-        session.deposit = newBalance;
-        session.expiresAt = Date.now() + CONFIG.channelTtlMs;
-        setDeposit(newBalance);
-        setBalance(newBalance - session.cumulativeAmount);
-        setTimeRemaining(CONFIG.channelTtlMs / 1000);
-        addLine('system', `Topped up! New balance: ${newBalance} stroops. Timer reset.`);
-      } else {
-        const body = await res.json().catch(() => ({}));
-        addLine('error', `Server rejected top-up: ${(body as any).detail || res.status}`);
+  const handleChat = useCallback(
+    async (message: string) => {
+      if (!sessionRef.current || !commitmentRef.current) {
+        addLine("system", "No active channel. Type /open first.");
+        return;
       }
-    } catch (e) {
-      addLine('error', `Top-up error: ${e}`);
+
+      const session = sessionRef.current;
+      // Pre-authorize: sign for max possible cost
+      const maxAuthorized = session.cumulativeAmount + CONFIG.maxCostPerMessage;
+
+      if (maxAuthorized > session.deposit) {
+        const remaining = session.deposit - session.cumulativeAmount;
+        if (remaining < CONFIG.costPerToken) {
+          addLine(
+            "system",
+            `Credits exhausted (${session.cumulativeAmount}/${session.deposit} used).`,
+          );
+          addLine("system", "Type /topup to add more credits, or /close to settle.");
+          return;
+        }
+      }
+
+      setDisabled(true);
+      try {
+        // 1. Simulate prepare_commitment for max authorized amount
+        const commitAmount = maxAuthorized > session.deposit ? session.deposit : maxAuthorized;
+        const commitmentBytes = await prepareCommitment(session.channelId, commitAmount);
+
+        // 2. Sign with ephemeral key
+        const signature = commitmentRef.current.sign(commitmentBytes as Buffer);
+        const sigHex = toHex(signature);
+
+        // 3. Build credential and send
+        const payload = buildVoucherPayload(session.channelId, commitAmount.toString(), sigHex);
+        const res = await sendChat(message, session, payload);
+
+        if (res.status === 402) {
+          addLine("error", "Server returned 402. Challenge may have expired. Try /open again.");
+          setDisabled(false);
+          return;
+        }
+
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({ detail: res.statusText }))) as {
+            detail?: string;
+          };
+          addLine("error", `Server error: ${body.detail || res.status}`);
+          setDisabled(false);
+          return;
+        }
+
+        // 4. Stream response with animated per-token credit burn
+        const priorCumulative = session.cumulativeAmount;
+        const prevBalance = session.deposit - priorCumulative;
+        setStreamingText("");
+        let fullResponse = "";
+        let tokenCount = 0;
+        let gotUsage = false;
+
+        for await (const event of streamTokens(res)) {
+          if (event.type === "token") {
+            fullResponse += event.text;
+            tokenCount++;
+            setStreamingText(fullResponse);
+
+            // Animate balance: deduct per-token cost as tokens arrive
+            const spent = BigInt(tokenCount) * CONFIG.costPerToken;
+            setBalance(prevBalance - spent);
+          } else if (event.type === "usage") {
+            // Server-reported cost is informational only — display it
+            gotUsage = true;
+            addLine("ai", fullResponse);
+            addLine(
+              "system",
+              `[${event.usage.completion_tokens} tokens, ${event.usage.cost} stroops]`,
+            );
+          }
+        }
+
+        // 5. Client computes cumulative from its own token count — no server trust needed
+        const actualCost = BigInt(tokenCount) * CONFIG.costPerToken;
+        session.cumulativeAmount = priorCumulative + actualCost;
+        setBalance(session.deposit - session.cumulativeAmount);
+        if (!gotUsage) {
+          addLine("ai", fullResponse);
+        }
+        setStreamingText("");
+      } catch (e) {
+        addLine("error", `Chat error: ${e}`);
+      }
+      setDisabled(false);
+    },
+    [addLine],
+  );
+
+  const handleCommand = useCallback(
+    async (cmd: string) => {
+      const command = cmd.toLowerCase().split(" ")[0];
+
+      switch (command) {
+        case "/help":
+          addLine("system", "Commands:");
+          addLine("system", "  /open   — Open a payment channel");
+          addLine("system", "  /close  — Close channel and settle on-chain");
+          addLine("system", "  /topup  — Add more credits to the channel");
+          addLine("system", "  /balance — Show channel balance");
+          addLine("system", "  /help   — Show this help");
+          addLine("system", "  (text)  — Send a chat message");
+          break;
+
+        case "/open":
+          await handleOpen();
+          break;
+
+        case "/close":
+          await handleClose();
+          break;
+
+        case "/topup":
+          await handleTopup();
+          break;
+
+        case "/balance":
+          if (!sessionRef.current) {
+            addLine("system", "No active channel. Type /open to start.");
+          } else {
+            const dep = sessionRef.current.deposit;
+            const sp = sessionRef.current.cumulativeAmount;
+            const rem = dep - sp;
+            addLine(
+              "system",
+              `Deposit: ${dep} stroops | Spent: ${sp} stroops | Remaining: ${rem} stroops`,
+            );
+          }
+          break;
+
+        default:
+          addLine("error", `Unknown command: ${command}. Type /help for commands.`);
+      }
+    },
+    [addLine, handleOpen, handleClose, handleTopup],
+  );
+
+  // Countdown timer — auto-close when expired
+  useEffect(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (!sessionRef.current) return;
+
+    timerRef.current = setInterval(() => {
+      const remaining = Math.max(
+        0,
+        Math.floor((sessionRef.current!.expiresAt - Date.now()) / 1000),
+      );
+      setTimeRemaining(remaining);
+      if (remaining <= 0) {
+        clearInterval(timerRef.current!);
+        addLine("system", "Channel expired. Auto-closing...");
+        handleClose();
+      }
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [channelId, addLine, handleClose]);
+
+  const handleSubmit = useCallback(async () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+    addLine("user", text);
+
+    if (text.startsWith("/")) {
+      await handleCommand(text);
+    } else {
+      await handleChat(text);
     }
-    setDisabled(false);
-  }
+  }, [input, addLine, handleCommand, handleChat]);
 
   return (
     <>
