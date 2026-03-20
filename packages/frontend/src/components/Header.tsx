@@ -61,7 +61,13 @@ function Header({ walletAddress, channelId, balance, deposit, timeRemaining }: H
             MPP Channel Demo
           </span>
         </div>
-        <dl className="grid grid-cols-3 gap-1.5 text-[11px] min-[521px]:text-xs">
+        <dl
+          className={`grid grid-cols-3 gap-1.5 text-[11px] min-[521px]:text-xs ${
+            deposit > BigInt(0)
+              ? "min-[700px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(300px,1.5fr)_minmax(0,1fr)]"
+              : ""
+          }`}
+        >
           <div className="min-w-0 rounded border border-neutral-800 bg-neutral-900/70 px-2 py-1">
             <dt className="text-[10px] uppercase tracking-wide text-neutral-500">Wallet</dt>
             <dd className="truncate text-neutral-200">{shortWallet}</dd>
@@ -70,13 +76,13 @@ function Header({ walletAddress, channelId, balance, deposit, timeRemaining }: H
             <dt className="text-[10px] uppercase tracking-wide text-neutral-500">Channel</dt>
             <dd className="truncate text-neutral-200">{shortChannel}</dd>
           </div>
-          <div className="min-w-0 rounded border border-neutral-800 bg-neutral-900/70 px-2 py-1">
+          <div className="order-3 min-w-0 rounded border border-neutral-800 bg-neutral-900/70 px-2 py-1 min-[700px]:order-4">
             <dt className="text-[10px] uppercase tracking-wide text-neutral-500">Timer</dt>
             <dd className="text-neutral-200">{timer}</dd>
           </div>
           {deposit > BigInt(0) && (
             <div
-              className="col-span-3 min-w-0 rounded border border-neutral-800 bg-neutral-900/70 px-2 py-1 text-neutral-200"
+              className="order-4 col-span-3 min-w-0 rounded border border-neutral-800 bg-neutral-900/70 px-2 py-1 text-neutral-200 min-[700px]:order-3 min-[700px]:col-span-1"
               aria-label={`credits ${balance.toString()} of ${deposit.toString()} stroops remaining`}
             >
               <dt className="text-[10px] uppercase tracking-wide text-neutral-500">Credits</dt>
