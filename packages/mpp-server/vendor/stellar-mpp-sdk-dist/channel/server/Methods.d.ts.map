@@ -1,1 +1,0 @@
-{"version":3,"file":"Methods.d.ts","sourceRoot":"","sources":["../../../sdk/src/channel/server/Methods.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,OAAO,IAAI,QAAQ,EAAE,MAAM,cAAc,CAAA;AAElD,wBAAgB,OAAO,CACrB,UAAU,EAAE,OAAO,CAAC,UAAU,GAC7B,UAAU,CAAC,OAAO,QAAQ,CAAC,CAE7B;AAED,yBAAiB,OAAO,CAAC;IACvB,KAAY,UAAU,GAAG,QAAQ,CAAC,UAAU,CAAA;IACrC,MAAM,OAAO,iBAAW,CAAA;CAChC"}

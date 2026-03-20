@@ -1,0 +1,6 @@
+[submodule "packages/contract"]
+	path = packages/contract
+	url = https://github.com/stellar-experimental/one-way-channel
+[submodule "packages/stellar-mpp-sdk"]
+	path = packages/stellar-mpp-sdk
+	url = https://github.com/stellar-experimental/stellar-mpp-sdk

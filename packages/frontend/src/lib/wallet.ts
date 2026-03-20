@@ -1,4 +1,5 @@
 import { Keypair } from '@stellar/stellar-sdk';
+import { getServer } from './stellar';
 
 const STORAGE_KEY = 'stellar_secret_key';
 
@@ -23,14 +24,31 @@ export function clearKeypair(): void {
   }
 }
 
-/** Fund wallet via testnet Friendbot. Idempotent — safe to call on already-funded accounts. */
+/** Check if account exists on the network via Soroban RPC. */
+async function accountExists(publicKey: string): Promise<boolean> {
+  try {
+    await getServer().getAccount(publicKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Ensure wallet is funded on testnet. Checks account via RPC first, only calls Friendbot if needed. */
 export async function fundWallet(publicKey: string): Promise<void> {
+  if (await accountExists(publicKey)) {
+    return; // Account exists on-network — already funded
+  }
+
   const res = await fetch(`https://friendbot.stellar.org?addr=${publicKey}`);
   if (!res.ok) {
-    // Friendbot returns 400 if already funded — that's fine
     const body = await res.text();
-    if (!body.includes('createAccountAlreadyExist')) {
-      throw new Error(`Friendbot failed: ${res.status}`);
+    if (
+      body.includes('createAccountAlreadyExist') ||
+      body.includes('already funded')
+    ) {
+      return; // Account exists — friendbot just can't re-fund it
     }
+    throw new Error(`Friendbot failed: ${res.status}`);
   }
 }

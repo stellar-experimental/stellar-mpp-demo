@@ -8,13 +8,13 @@
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^14.6.1",
-    "hono": "^4.7.0",
+    "hono": "^4.12.8",
     "mppx": "^0.4.7",
-    "stellar-mpp-sdk": "file:vendor/stellar-mpp-sdk-dist"
+    "stellar-mpp-sdk": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250620.0",
-    "typescript": "^5.7.2",
+    "@cloudflare/workers-types": "^4.20260317.1",
+    "typescript": "^5.9.3",
     "wrangler": "^4.75.0"
   }
 }

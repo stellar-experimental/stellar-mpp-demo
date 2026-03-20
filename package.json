@@ -2,6 +2,7 @@
   "name": "mpp-channel-demo",
   "private": true,
   "scripts": {
+    "build:sdk": "pnpm --filter stellar-mpp-sdk run build",
     "dev": "concurrently -n server,ai,frontend -c blue,magenta,green \"pnpm dev:server\" \"pnpm dev:ai\" \"pnpm dev:frontend\"",
     "dev:frontend": "pnpm --filter frontend run dev",
     "dev:server": "pnpm --filter mpp-server run dev",
