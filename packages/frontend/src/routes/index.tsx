@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef, useDeferredValue, startTransition } from "react";
 import { Keypair } from "@stellar/stellar-sdk";
 import Header from "../components/Header";
-import Terminal, { type TerminalLine } from "../components/Terminal";
+import Terminal, { type TerminalCommand, type TerminalLine } from "../components/Terminal";
 import { getOrCreateKeypair, fundWallet } from "../lib/wallet";
 import {
   openChannel,
@@ -34,7 +34,18 @@ function newLine(type: TerminalLine["type"], content: string): TerminalLine {
 type RequestState = "idle" | "opening" | "chatting" | "topping-up" | "closing";
 type WalletStatus = "created" | "restored" | null;
 
-const STARTUP_HINT = "Type /wtf for the protocol tour, /help for commands, or /open to start a session.\n";
+const STARTUP_HINT =
+  "Type /wtf for the protocol tour, /help for commands, or /open to start a session.\n";
+const MOBILE_COMMANDS: TerminalCommand[] = [
+  { command: "/wtf", label: "WTF" },
+  { command: "/help", label: "Help" },
+  { command: "/open", label: "Open" },
+  { command: "/balance", label: "Balance" },
+  { command: "/topup", label: "Top Up" },
+  { command: "/close", label: "Close" },
+  { command: "/clear", label: "Clear" },
+  { command: "/github", label: "GitHub" },
+];
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -57,39 +68,28 @@ function renderMarkdownForTerminal(markdown: string): string {
     }
 
     if (line.startsWith("# ")) {
-      const title = line
-        .slice(2)
-        .replace(/\*\*/g, "")
-        .trim()
-        .toUpperCase();
+      const title = line.slice(2).replace(/\*\*/g, "").trim().toUpperCase();
       rendered.push(title);
       rendered.push("=".repeat(title.length));
       continue;
     }
 
     if (line.startsWith("## ")) {
-      const title = line
-        .slice(3)
-        .replace(/\*\*/g, "")
-        .trim()
-        .toUpperCase();
+      const title = line.slice(3).replace(/\*\*/g, "").trim().toUpperCase();
       if (rendered.at(-1) !== "") rendered.push("");
       rendered.push(title);
       continue;
     }
 
     if (line.startsWith("### ")) {
-      const title = line
-        .slice(4)
-        .replace(/\*\*/g, "")
-        .trim();
+      const title = line.slice(4).replace(/\*\*/g, "").trim();
       if (rendered.at(-1) !== "") rendered.push("");
       rendered.push(title);
       continue;
     }
 
     const text = line
-      .replace(/^\-\s+/, "• ")
+      .replace(/^-\s+/, "• ")
       .replace(/^>\s+/, '"')
       .replace(/\*\*/g, "")
       .replace(/`([^`]+)`/g, "$1");
@@ -102,7 +102,10 @@ function renderMarkdownForTerminal(markdown: string): string {
     rendered.push(text);
   }
 
-  return rendered.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return rendered
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function App() {
@@ -149,24 +152,26 @@ function App() {
       nextWalletReady?: boolean;
       nextWalletFundingError?: string | null;
     } = {}): TerminalLine[] => {
-    const startupLines: TerminalLine[] = [
-      newLine("system", "MPP Channel Demo — Stellar Payment Channels via HTTP 402"),
-      newLine("system", STARTUP_HINT),
-    ];
+      const startupLines: TerminalLine[] = [
+        newLine("system", "MPP Channel Demo — Stellar Payment Channels via HTTP 402"),
+        newLine("system", STARTUP_HINT),
+      ];
 
-    if (nextWalletAddress && nextWalletStatus) {
-      startupLines.push(newLine("system", `Wallet ${nextWalletStatus}: ${nextWalletAddress}`));
-      startupLines.push(newLine("system", "Ensuring account is funded..."));
+      if (nextWalletAddress && nextWalletStatus) {
+        startupLines.push(newLine("system", `Wallet ${nextWalletStatus}: ${nextWalletAddress}`));
+        startupLines.push(newLine("system", "Ensuring account is funded..."));
 
-      if (nextWalletReady) {
-        startupLines.push(newLine("success", "Wallet ready on testnet."));
-      } else if (nextWalletFundingError) {
-        startupLines.push(newLine("error", nextWalletFundingError));
+        if (nextWalletReady) {
+          startupLines.push(newLine("success", "Wallet ready on testnet."));
+        } else if (nextWalletFundingError) {
+          startupLines.push(newLine("error", nextWalletFundingError));
+        }
       }
-    }
 
-    return startupLines;
-  }, [walletAddress, walletFundingError, walletReady, walletStatus]);
+      return startupLines;
+    },
+    [walletAddress, walletFundingError, walletReady, walletStatus],
+  );
   const clearTerminalLog = useCallback(() => {
     setStreamingText("");
     setLines(buildStartupLines());
@@ -328,7 +333,7 @@ function App() {
       setDisabled(false);
       setRequestState("idle");
     }
-  }, [addLine, walletReady]);
+  }, [addLine, addSuccess, walletReady]);
 
   const handleTopup = useCallback(async () => {
     if (!sessionRef.current || !walletRef.current) {
@@ -372,7 +377,7 @@ function App() {
       setDisabled(false);
       setRequestState("idle");
     }
-  }, [addLine]);
+  }, [addLine, addSuccess]);
 
   const handleClose = useCallback(async () => {
     if (!sessionRef.current) {
@@ -425,7 +430,9 @@ function App() {
           const closed = body.closedAmount || session.cumulativeAmount.toString();
           const spent = body.actualSpend || session.cumulativeAmount.toString();
           if (closed !== spent) {
-            addSuccess(`Channel closed: ${closed} stroops on-chain (actual spend: ${spent} stroops).`);
+            addSuccess(
+              `Channel closed: ${closed} stroops on-chain (actual spend: ${spent} stroops).`,
+            );
           } else {
             addSuccess(`Channel closed: ${spent} stroops.`);
           }
@@ -453,7 +460,7 @@ function App() {
     }
     setDisabled(false);
     setRequestState("idle");
-  }, [addLine]);
+  }, [addLine, addSuccess, addWarning]);
 
   const handleChat = useCallback(
     async (message: string) => {
@@ -601,7 +608,10 @@ function App() {
           addLine("system", "  /github  — View project source on GitHub");
           addLine("system", "  /help    — Show this help");
           addLine("system", "  (text)   — Send a chat message");
-          addLine("system", "\nSuggested next step: /wtf for the tour, or /open to watch it happen.");
+          addLine(
+            "system",
+            "\nSuggested next step: /wtf for the tour, or /open to watch it happen.",
+          );
           break;
 
         case "/open":
@@ -641,7 +651,10 @@ function App() {
 
         case "/wtf":
           await streamMarkdownNarration(renderMarkdownForTerminal(wtfMarkdown));
-          addLine("system", "\nSuggested next step: /open to run the flow live, or /help to see the controls.");
+          addLine(
+            "system",
+            "\nSuggested next step: /open to run the flow live, or /help to see the controls.",
+          );
           break;
 
         default:
@@ -687,6 +700,15 @@ function App() {
     }
   }, [input, addLine, handleCommand, handleChat]);
 
+  const handleQuickCommand = useCallback(
+    async (command: string) => {
+      setInput("");
+      addLine("user", command);
+      await handleCommand(command);
+    },
+    [addLine, handleCommand],
+  );
+
   return (
     <>
       <Header
@@ -702,6 +724,8 @@ function App() {
         input={input}
         onInputChange={setInput}
         onSubmit={handleSubmit}
+        onCommandTap={handleQuickCommand}
+        commands={MOBILE_COMMANDS}
         disabled={disabled}
         requestState={requestState}
         lastUsageTokens={lastUsageTokens}

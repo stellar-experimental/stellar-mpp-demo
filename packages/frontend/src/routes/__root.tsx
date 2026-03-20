@@ -20,7 +20,10 @@ function RootDocument() {
         <HeadContent />
       </head>
       <body>
-        <div id="root" className="h-screen flex flex-col bg-black text-neutral-300 font-mono">
+        <div
+          id="root"
+          className="flex h-screen min-h-[100dvh] flex-col bg-black text-neutral-300 font-mono"
+        >
           <Outlet />
         </div>
         <Scripts />
