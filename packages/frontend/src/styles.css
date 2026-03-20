@@ -4,12 +4,12 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: #000;
-  color: #e0e0e0;
+  background: #050505;
+  color: #f3f4f6;
   font-family:
     ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.6;
   height: 100%;
   overflow: hidden;
 }
@@ -30,6 +30,12 @@ body {
 
 .cursor-blink {
   animation: blink 1s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor-blink {
+    animation: none;
+  }
 }
 
 .scrollbar-thin::-webkit-scrollbar {

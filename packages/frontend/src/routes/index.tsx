@@ -22,6 +22,7 @@ import {
   buildClosePayload,
   type ChannelSession,
 } from "../lib/mpp-client";
+import wtfMarkdown from "../content/wtf.md?raw";
 
 export const Route = createFileRoute("/")({ component: App });
 
@@ -31,6 +32,78 @@ function newLine(type: TerminalLine["type"], content: string): TerminalLine {
 }
 
 type RequestState = "idle" | "opening" | "chatting" | "topping-up" | "closing";
+type WalletStatus = "created" | "restored" | null;
+
+const STARTUP_HINT = "Type /help for commands, or /open to start a session.\n";
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function chunkMarkdownForStream(markdown: string): string[] {
+  return markdown.match(/\S+\s*/g) ?? [markdown];
+}
+
+function renderMarkdownForTerminal(markdown: string): string {
+  const lines = markdown.split("\n");
+  const rendered: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+
+    if (!line.trim()) {
+      if (rendered.at(-1) !== "") rendered.push("");
+      continue;
+    }
+
+    if (line.startsWith("# ")) {
+      const title = line
+        .slice(2)
+        .replace(/\*\*/g, "")
+        .trim()
+        .toUpperCase();
+      rendered.push(title);
+      rendered.push("=".repeat(title.length));
+      continue;
+    }
+
+    if (line.startsWith("## ")) {
+      const title = line
+        .slice(3)
+        .replace(/\*\*/g, "")
+        .trim()
+        .toUpperCase();
+      if (rendered.at(-1) !== "") rendered.push("");
+      rendered.push(title);
+      continue;
+    }
+
+    if (line.startsWith("### ")) {
+      const title = line
+        .slice(4)
+        .replace(/\*\*/g, "")
+        .trim();
+      if (rendered.at(-1) !== "") rendered.push("");
+      rendered.push(title);
+      continue;
+    }
+
+    const text = line
+      .replace(/^\-\s+/, "• ")
+      .replace(/^>\s+/, '"')
+      .replace(/\*\*/g, "")
+      .replace(/`([^`]+)`/g, "$1");
+
+    if (line.startsWith("> ")) {
+      rendered.push(`${text}"`);
+      continue;
+    }
+
+    rendered.push(text);
+  }
+
+  return rendered.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 function App() {
   const [lines, setLines] = useState<TerminalLine[]>([]);
@@ -43,6 +116,8 @@ function App() {
   const [lastUsageTurn, setLastUsageTurn] = useState(0);
 
   const [walletReady, setWalletReady] = useState(false);
+  const [walletStatus, setWalletStatus] = useState<WalletStatus>(null);
+  const [walletFundingError, setWalletFundingError] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState("");
   const [channelId, setChannelId] = useState<string | null>(null);
   const [balance, setBalance] = useState(BigInt(0));
@@ -59,32 +134,95 @@ function App() {
   const addLine = useCallback((type: TerminalLine["type"], content: string) => {
     setLines((prev) => [...prev, newLine(type, content)]);
   }, []);
+  const addSuccess = useCallback((content: string) => addLine("success", content), [addLine]);
+  const addWarning = useCallback((content: string) => addLine("warning", content), [addLine]);
+  const addBilling = useCallback((content: string) => addLine("billing", content), [addLine]);
+  const buildStartupLines = useCallback(
+    ({
+      nextWalletAddress = walletAddress,
+      nextWalletStatus = walletStatus,
+      nextWalletReady = walletReady,
+      nextWalletFundingError = walletFundingError,
+    }: {
+      nextWalletAddress?: string;
+      nextWalletStatus?: WalletStatus;
+      nextWalletReady?: boolean;
+      nextWalletFundingError?: string | null;
+    } = {}): TerminalLine[] => {
+    const startupLines: TerminalLine[] = [
+      newLine("system", "MPP Channel Demo — Stellar Payment Channels via HTTP 402"),
+      newLine("system", STARTUP_HINT),
+    ];
+
+    if (nextWalletAddress && nextWalletStatus) {
+      startupLines.push(newLine("system", `Wallet ${nextWalletStatus}: ${nextWalletAddress}`));
+      startupLines.push(newLine("system", "Ensuring account is funded..."));
+
+      if (nextWalletReady) {
+        startupLines.push(newLine("success", "Wallet ready on testnet."));
+      } else if (nextWalletFundingError) {
+        startupLines.push(newLine("error", nextWalletFundingError));
+      }
+    }
+
+    return startupLines;
+  }, [walletAddress, walletFundingError, walletReady, walletStatus]);
+  const clearTerminalLog = useCallback(() => {
+    setStreamingText("");
+    setLines(buildStartupLines());
+  }, [buildStartupLines]);
 
   // Initialize wallet on mount (client-side only)
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (walletRef.current) return;
 
     const init = async () => {
-      addLine("system", "MPP Channel Demo — Stellar Payment Channels via HTTP 402");
-      addLine("system", "Type /help for commands, or /open to start a session.\n");
+      setLines(buildStartupLines());
 
       const { keypair, isNew } = getOrCreateKeypair();
+      const nextWalletStatus = isNew ? "created" : "restored";
+      const nextWalletAddress = keypair.publicKey();
       walletRef.current = keypair;
-      setWalletAddress(keypair.publicKey());
-
-      addLine("system", `Wallet ${isNew ? "created" : "restored"}: ${keypair.publicKey()}`);
-      addLine("system", "Ensuring account is funded...");
+      setWalletAddress(nextWalletAddress);
+      setWalletStatus(nextWalletStatus);
+      setWalletFundingError(null);
+      setLines(
+        buildStartupLines({
+          nextWalletAddress,
+          nextWalletStatus,
+          nextWalletReady: false,
+          nextWalletFundingError: null,
+        }),
+      );
 
       try {
-        await fundWallet(keypair.publicKey());
-        addLine("system", "Wallet ready on testnet.");
+        await fundWallet(nextWalletAddress);
+        setWalletFundingError(null);
         setWalletReady(true);
+        setLines(
+          buildStartupLines({
+            nextWalletAddress,
+            nextWalletStatus,
+            nextWalletReady: true,
+            nextWalletFundingError: null,
+          }),
+        );
       } catch (e) {
-        addLine("error", `Funding failed: ${e}. Reload to retry.`);
+        const message = `Funding failed: ${e}. Reload to retry.`;
+        setWalletFundingError(message);
+        setLines(
+          buildStartupLines({
+            nextWalletAddress,
+            nextWalletStatus,
+            nextWalletReady: false,
+            nextWalletFundingError: message,
+          }),
+        );
       }
     };
     init();
-  }, [addLine]);
+  }, [buildStartupLines]);
 
   const handleOpen = useCallback(async () => {
     if (sessionRef.current) {
@@ -124,7 +262,7 @@ function App() {
         walletRef.current,
         commitmentKp,
       );
-      addLine("system", `Channel deployed: ${chanId}`);
+      addSuccess(`Channel deployed: ${chanId}`);
       addLine("system", `Open tx: https://stellar.expert/explorer/testnet/tx/${openTxHash}`);
 
       // 4. Register channel with the server
@@ -177,8 +315,7 @@ function App() {
 
       const ttlMin = Math.floor(ttlSeconds / 60);
       const ttlSec = ttlSeconds % 60;
-      addLine(
-        "system",
+      addSuccess(
         `Channel open! ${CONFIG.deposit.toString()} stroops deposited. Timer: ${ttlMin}:${ttlSec.toString().padStart(2, "0")}`,
       );
       addLine(
@@ -224,7 +361,7 @@ function App() {
         setDeposit(newBalance);
         setBalance(newBalance - session.cumulativeAmount);
         setTimeRemaining(Math.max(0, Math.floor((newExpiresAt - Date.now()) / 1000)));
-        addLine("system", `Topped up! Deposit now ${newBalance} stroops. Timer reset.`);
+        addSuccess(`Topped up! Deposit now ${newBalance} stroops. Timer reset.`);
       } else {
         const body = (await res.json().catch(() => ({}))) as { detail?: string };
         addLine("error", `Server rejected top-up: ${body.detail || res.status}`);
@@ -278,28 +415,24 @@ function App() {
           addLine("system", "Channel already closed by server.");
           shouldClearSession = true;
         } else if (body.status === "closing") {
-          addLine(
-            "system",
+          addWarning(
             `Channel closing — server will finalize ${body.closedAmount || session.cumulativeAmount} stroops on-chain.`,
           );
         } else if (body.status === "no-funds") {
-          addLine("system", "Channel closed. No charges.");
+          addSuccess("Channel closed. No charges.");
           shouldClearSession = true;
         } else if (body.txHash) {
           const closed = body.closedAmount || session.cumulativeAmount.toString();
           const spent = body.actualSpend || session.cumulativeAmount.toString();
           if (closed !== spent) {
-            addLine(
-              "system",
-              `Channel closed: ${closed} stroops on-chain (actual spend: ${spent} stroops).`,
-            );
+            addSuccess(`Channel closed: ${closed} stroops on-chain (actual spend: ${spent} stroops).`);
           } else {
-            addLine("system", `Channel closed: ${spent} stroops.`);
+            addSuccess(`Channel closed: ${spent} stroops.`);
           }
           addLine("system", `Close tx: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
           shouldClearSession = true;
         } else {
-          addLine("system", "Channel closed.");
+          addSuccess("Channel closed.");
           shouldClearSession = true;
         }
       } else {
@@ -336,11 +469,8 @@ function App() {
       if (maxAuthorized > session.deposit) {
         const remaining = session.deposit - session.cumulativeAmount;
         if (remaining < CONFIG.costPerToken) {
-          addLine(
-            "system",
-            `Credits exhausted (${session.cumulativeAmount}/${session.deposit} used).`,
-          );
-          addLine("system", "Type /topup to add more credits, or /close to settle.");
+          addWarning(`Credits exhausted (${session.cumulativeAmount}/${session.deposit} used).`);
+          addWarning("Type /topup to add more credits, or /close to settle.");
           return;
         }
       }
@@ -399,10 +529,7 @@ function App() {
             setLastUsageCost(event.usage.cost);
             setLastUsageTurn((prev) => prev + 1);
             addLine("ai", fullResponse);
-            addLine(
-              "system",
-              `[${event.usage.completion_tokens} tokens, ${event.usage.cost} stroops]`,
-            );
+            addBilling(`[${event.usage.completion_tokens} tokens, ${event.usage.cost} stroops]`);
           }
         }
 
@@ -421,6 +548,40 @@ function App() {
         setRequestState("idle");
       }
     },
+    [addBilling, addLine, addWarning],
+  );
+
+  const streamMarkdownNarration = useCallback(
+    async (markdown: string) => {
+      setDisabled(true);
+      setRequestState("chatting");
+      setStreamingText("");
+
+      try {
+        const chunks = chunkMarkdownForStream(markdown);
+        let rendered = "";
+
+        await sleep(280);
+
+        for (const chunk of chunks) {
+          rendered += chunk;
+          startTransition(() => {
+            setStreamingText(rendered);
+          });
+
+          const normalized = chunk.trim();
+          const delay = normalized.length > 8 ? 48 + Math.random() * 110 : 28 + Math.random() * 70;
+          await sleep(delay);
+        }
+
+        await sleep(160);
+        addLine("ai", rendered.trimEnd());
+      } finally {
+        setStreamingText("");
+        setDisabled(false);
+        setRequestState("idle");
+      }
+    },
     [addLine],
   );
 
@@ -435,9 +596,12 @@ function App() {
           addLine("system", "  /close   — Close channel and settle on-chain");
           addLine("system", "  /topup   — Add more credits to the channel");
           addLine("system", "  /balance — Show channel balance");
+          addLine("system", "  /clear   — Reset the terminal log");
+          addLine("system", "  /wtf     — Explain what this demo is actually doing");
           addLine("system", "  /github  — View project source on GitHub");
           addLine("system", "  /help    — Show this help");
           addLine("system", "  (text)   — Send a chat message");
+          addLine("system", "\nSuggested next step: /wtf for the tour, or /open to watch it happen.");
           break;
 
         case "/open":
@@ -471,11 +635,20 @@ function App() {
           }
           break;
 
+        case "/clear":
+          clearTerminalLog();
+          break;
+
+        case "/wtf":
+          await streamMarkdownNarration(renderMarkdownForTerminal(wtfMarkdown));
+          addLine("system", "\nSuggested next step: /open to run the flow live, or /help to see the controls.");
+          break;
+
         default:
           addLine("error", `Unknown command: ${command}. Type /help for commands.`);
       }
     },
-    [addLine, handleOpen, handleClose, handleTopup],
+    [addLine, clearTerminalLog, handleOpen, handleClose, handleTopup, streamMarkdownNarration],
   );
 
   // Countdown timer — auto-close when expired
@@ -491,7 +664,7 @@ function App() {
       setTimeRemaining(remaining);
       if (remaining <= 0) {
         clearInterval(timerRef.current!);
-        addLine("system", "Channel expired. Auto-closing...");
+        addWarning("Channel expired. Auto-closing...");
         handleClose();
       }
     }, 1000);
@@ -499,7 +672,7 @@ function App() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [channelId, addLine, handleClose]);
+  }, [channelId, addWarning, handleClose]);
 
   const handleSubmit = useCallback(async () => {
     const text = input.trim();

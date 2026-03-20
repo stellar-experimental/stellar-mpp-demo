@@ -26,15 +26,34 @@ function Header({ walletAddress, channelId, balance, deposit, timeRemaining }: H
   const shortChannel = channelId ? `${channelId.slice(0, 4)}...${channelId.slice(-4)}` : "none";
 
   return (
-    <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-neutral-900 text-neutral-500 text-xs border-b border-neutral-800">
-      <span>MPP Channel Demo</span>
-      <div className="flex gap-4">
-        <span>wallet:{shortWallet}</span>
-        <span>channel:{shortChannel}</span>
-        {deposit > BigInt(0) && <span>credits:{creditBar(balance, deposit)}</span>}
-        <span>timer:{timer}</span>
+    <header className="shrink-0 border-b border-neutral-700 bg-neutral-900 px-3 py-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-sm font-semibold tracking-wide text-neutral-100">MPP Channel Demo</span>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] sm:text-xs">
+          <span className="text-neutral-300">
+            <span className="text-neutral-400">wallet:</span>
+            {shortWallet}
+          </span>
+          <span className="text-neutral-300">
+            <span className="text-neutral-400">channel:</span>
+            {shortChannel}
+          </span>
+          {deposit > BigInt(0) && (
+            <span
+              className="text-neutral-200"
+              aria-label={`credits ${balance.toString()} of ${deposit.toString()} stroops remaining`}
+            >
+              <span className="text-neutral-400">credits:</span>
+              {creditBar(balance, deposit)}
+            </span>
+          )}
+          <span className="text-neutral-300">
+            <span className="text-neutral-400">timer:</span>
+            {timer}
+          </span>
+        </div>
       </div>
-    </div>
+    </header>
   );
 }
 
