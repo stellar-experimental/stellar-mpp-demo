@@ -29,7 +29,7 @@ function Header({ walletAddress, channelId, balance, deposit, timeRemaining }: H
     <header className="shrink-0 border-b border-neutral-700 bg-neutral-900 px-3 py-2">
       <div className="hidden min-[901px]:flex min-[901px]:items-start min-[901px]:gap-4">
         <span className="shrink-0 text-sm font-semibold tracking-wide text-neutral-100">
-          MPP Channel Demo
+          MPP Chat Demo
         </span>
         <div className="ml-auto flex max-w-[70%] flex-wrap justify-end gap-x-4 gap-y-1 text-right text-xs">
           <span className="text-neutral-300">
@@ -37,7 +37,7 @@ function Header({ walletAddress, channelId, balance, deposit, timeRemaining }: H
             {shortWallet}
           </span>
           <span className="text-neutral-300">
-            <span className="text-neutral-400">channel:</span>
+            <span className="text-neutral-400">session:</span>
             {shortChannel}
           </span>
           {deposit > BigInt(0) && (
@@ -58,7 +58,7 @@ function Header({ walletAddress, channelId, balance, deposit, timeRemaining }: H
       <div className="flex flex-col gap-2 min-[901px]:hidden">
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm font-semibold tracking-wide text-neutral-100">
-            MPP Channel Demo
+            MPP Chat Demo
           </span>
         </div>
         <dl
@@ -73,7 +73,7 @@ function Header({ walletAddress, channelId, balance, deposit, timeRemaining }: H
             <dd className="truncate text-neutral-200">{shortWallet}</dd>
           </div>
           <div className="min-w-0 rounded border border-neutral-800 bg-neutral-900/70 px-2 py-1">
-            <dt className="text-[10px] uppercase tracking-wide text-neutral-500">Channel</dt>
+            <dt className="text-[10px] uppercase tracking-wide text-neutral-500">Session</dt>
             <dd className="truncate text-neutral-200">{shortChannel}</dd>
           </div>
           <div className="order-3 min-w-0 rounded border border-neutral-800 bg-neutral-900/70 px-2 py-1 min-[700px]:order-4">

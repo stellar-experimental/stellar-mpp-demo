@@ -1,8 +1,8 @@
 # WTF Is This Demo?
 
-This is an **HTTP 402 + MPP + Stellar payment channel terminal**.
+This is an **HTTP 402 + MPP + Stellar session terminal**.
 
-You are talking to an AI service that can get paid **inside the request flow itself**. Instead of asking your wallet to approve every prompt, the app opens a **one-way Stellar channel** once, then uses **signed off-chain vouchers** while the model streams.
+You are talking to an AI service that can get paid **inside the request flow itself**. Instead of asking your wallet to approve every prompt, the app opens an **MPP session** once, then uses **signed off-chain vouchers** while the model streams.
 
 ## Why It Hits
 
@@ -14,10 +14,10 @@ You are talking to an AI service that can get paid **inside the request flow its
 
 ## The Moving Parts
 
-- **Frontend:** makes a testnet wallet, opens the channel, signs vouchers, and renders the terminal.
-- **MPP server:** issues 402 challenges, verifies credentials, tracks channel state, and closes on-chain.
+- **Frontend:** makes a testnet wallet, opens a session, signs vouchers, and renders the terminal.
+- **MPP server:** issues 402 challenges, verifies credentials, tracks session state, and closes on-chain.
 - **AI worker:** streams model output.
-- **Channel contract:** escrows funds and lets the server claim up to the latest valid signed amount.
+- **Channel contract:** the underlying Soroban contract that escrows funds and lets the server claim up to the latest valid signed amount.
 
 ## The Core Idea
 
@@ -28,7 +28,7 @@ MPP is the payment-aware HTTP wrapper.
 3. That challenge says "pay me with the `stellar` method using a `channel` flow."
 4. The client answers with `Authorization: Payment ...` carrying a verifiable credential.
 
-So the request is not "I promise I’ll pay." It is "Here is the payment proof answering your challenge."
+So the request is not "I promise I'll pay." It is "Here is the payment proof answering your challenge."
 
 ## The Stellar Part
 
@@ -37,13 +37,13 @@ On first load, the frontend creates a **temporary Stellar testnet wallet** and f
 When you run `/open`, it:
 
 1. Creates a second temporary **commitment keypair**.
-2. Deploys and funds a **channel contract**.
+2. Deploys and funds a **channel contract** on Soroban.
 3. Sets the server as recipient.
-4. Stores the commitment public key in the channel.
+4. Stores the commitment public key in the channel contract.
 
 That split matters:
 
-- the wallet key handles channel funding and lifecycle actions
+- the wallet key handles session funding and lifecycle actions
 - the commitment key signs spend updates
 - after open, normal chats need **no wallet interaction**
 
@@ -51,11 +51,11 @@ That split matters:
 
 Each chat sends a signed message that says, in effect:
 
-> "This channel may now pay the server up to X stroops."
+> "This session may now pay the server up to X stroops."
 
 That message is the **voucher**.
 
-The contract itself generates the exact bytes to sign through `prepare_commitment(amount)`. Both sides use those bytes, so the contract is the source of truth for what a valid commitment is.
+The channel contract itself generates the exact bytes to sign through `prepare_commitment(amount)`. Both sides use those bytes, so the contract is the source of truth for what a valid commitment is.
 
 The amount is **cumulative**.
 
@@ -66,9 +66,9 @@ If the first chat authorizes `18,000` stroops and the second reaches `31,000`, t
 ### `/open`
 
 - client requests a 402 challenge
-- client opens and funds the Stellar channel
+- client deploys the Stellar channel contract and opens a session
 - client sends an MPP `open` credential
-- server records the channel and starts its timer
+- server records the session and starts its timer
 
 Result: funds are locked, spend is still zero.
 
@@ -90,7 +90,7 @@ Result: the server can stream immediately because it already has a signed spendi
 - client sends an MPP `topup` credential with the tx hash
 - server refreshes balance and resets the timer
 
-Result: same channel, more runway.
+Result: same session, more runway.
 
 ### `chat`
 
@@ -101,7 +101,7 @@ Same flow again, but with a higher cumulative authorized amount.
 - client can send one final tighter voucher
 - client sends an MPP `close` credential
 - server submits `close(amount, sig)` on-chain
-- contract pays the server and closes the channel
+- the channel contract pays the server and closes
 
 Result: many streamed AI turns settle with one final on-chain close.
 
@@ -109,7 +109,7 @@ Result: many streamed AI turns settle with one final on-chain close.
 
 This demo makes AI billing feel like **protocol behavior**, not checkout behavior:
 
-**402 challenge -> channel open -> off-chain signed vouchers -> streamed AI -> top-up if needed -> final on-chain close**
+**402 challenge -> session open -> off-chain signed vouchers -> streamed AI -> top-up if needed -> final on-chain close**
 
 That is the point of the whole thing:
 

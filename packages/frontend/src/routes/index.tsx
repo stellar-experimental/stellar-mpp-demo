@@ -153,7 +153,8 @@ function App() {
       nextWalletFundingError?: string | null;
     } = {}): TerminalLine[] => {
       const startupLines: TerminalLine[] = [
-        newLine("system", "MPP Channel Demo — Stellar Payment Channels via HTTP 402"),
+        newLine("system", "MPP Chat Demo — AI chatbot with pay-per-message via MPP Sessions on Stellar"),
+        newLine("system", "https://mpp.dev | https://github.com/stellar-experimental/stellar-mpp-sdk | https://github.com/stellar-experimental/stellar-mpp-demo"),
         newLine("system", STARTUP_HINT),
       ];
 
@@ -231,7 +232,7 @@ function App() {
 
   const handleOpen = useCallback(async () => {
     if (sessionRef.current) {
-      addLine("error", "Channel already open. /close it first.");
+      addLine("error", "Session already open. /close it first.");
       return;
     }
     if (!walletRef.current || !walletReady) {
@@ -256,7 +257,7 @@ function App() {
       }
 
       const challenge = parseChallenge(challengeRes);
-      addLine("system", "Challenge received. Opening channel on Stellar...");
+      addLine("system", "Challenge received. Opening session on Stellar...");
 
       // 2. Generate ephemeral commitment keypair
       const commitmentKp = Keypair.random();
@@ -267,11 +268,11 @@ function App() {
         walletRef.current,
         commitmentKp,
       );
-      addSuccess(`Channel deployed: ${chanId}`);
+      addSuccess(`Session opened: ${chanId}`);
       addLine("system", `Open tx: https://stellar.expert/explorer/testnet/tx/${openTxHash}`);
 
       // 4. Register channel with the server
-      addLine("system", "Registering channel with MPP server...");
+      addLine("system", "Registering session...");
       const commitmentKeyHex = toHex(commitmentKp.rawPublicKey());
       const openPayload = buildOpenPayload(chanId, commitmentKeyHex);
       const tempSession = {
@@ -321,7 +322,7 @@ function App() {
       const ttlMin = Math.floor(ttlSeconds / 60);
       const ttlSec = ttlSeconds % 60;
       addSuccess(
-        `Channel open! ${CONFIG.deposit.toString()} stroops deposited. Timer: ${ttlMin}:${ttlSec.toString().padStart(2, "0")}`,
+        `Session open! ${CONFIG.deposit.toString()} stroops deposited. Timer: ${ttlMin}:${ttlSec.toString().padStart(2, "0")}`,
       );
       addLine(
         "system",
@@ -337,7 +338,7 @@ function App() {
 
   const handleTopup = useCallback(async () => {
     if (!sessionRef.current || !walletRef.current) {
-      addLine("system", "No active channel. Type /open first.");
+      addLine("system", "No active session. Type /open first.");
       return;
     }
 
@@ -381,13 +382,13 @@ function App() {
 
   const handleClose = useCallback(async () => {
     if (!sessionRef.current) {
-      addLine("system", "No active channel to close.");
+      addLine("system", "No active session to close.");
       return;
     }
 
     setDisabled(true);
     setRequestState("closing");
-    addLine("system", "Closing channel...");
+    addLine("system", "Closing session...");
     let shouldClearSession = false;
     try {
       const session = sessionRef.current;
@@ -417,29 +418,29 @@ function App() {
           actualSpend?: string;
         };
         if (body.status === "already-closed") {
-          addLine("system", "Channel already closed by server.");
+          addLine("system", "Session already closed by server.");
           shouldClearSession = true;
         } else if (body.status === "closing") {
           addWarning(
-            `Channel closing — server will finalize ${body.closedAmount || session.cumulativeAmount} stroops on-chain.`,
+            `Session closing — server will finalize ${body.closedAmount || session.cumulativeAmount} stroops on-chain.`,
           );
         } else if (body.status === "no-funds") {
-          addSuccess("Channel closed. No charges.");
+          addSuccess("Session closed. No charges.");
           shouldClearSession = true;
         } else if (body.txHash) {
           const closed = body.closedAmount || session.cumulativeAmount.toString();
           const spent = body.actualSpend || session.cumulativeAmount.toString();
           if (closed !== spent) {
             addSuccess(
-              `Channel closed: ${closed} stroops on-chain (actual spend: ${spent} stroops).`,
+              `Session closed: ${closed} stroops on-chain (actual spend: ${spent} stroops).`,
             );
           } else {
-            addSuccess(`Channel closed: ${spent} stroops.`);
+            addSuccess(`Session closed: ${spent} stroops.`);
           }
           addLine("system", `Close tx: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
           shouldClearSession = true;
         } else {
-          addSuccess("Channel closed.");
+          addSuccess("Session closed.");
           shouldClearSession = true;
         }
       } else {
@@ -465,7 +466,7 @@ function App() {
   const handleChat = useCallback(
     async (message: string) => {
       if (!sessionRef.current || !commitmentRef.current) {
-        addLine("system", "No active channel. Type /open first.");
+        addLine("system", "No active session. Type /open first.");
         return;
       }
 
@@ -599,10 +600,10 @@ function App() {
       switch (command) {
         case "/help":
           addLine("system", "Commands:");
-          addLine("system", "  /open    — Open a payment channel");
-          addLine("system", "  /close   — Close channel and settle on-chain");
-          addLine("system", "  /topup   — Add more credits to the channel");
-          addLine("system", "  /balance — Show channel balance");
+          addLine("system", "  /open    — Open a session");
+          addLine("system", "  /close   — Close session and settle on-chain");
+          addLine("system", "  /topup   — Add more credits to the session");
+          addLine("system", "  /balance — Show session balance");
           addLine("system", "  /clear   — Reset the terminal log");
           addLine("system", "  /wtf     — Explain what this demo is actually doing");
           addLine("system", "  /github  — View project source on GitHub");
@@ -633,7 +634,7 @@ function App() {
 
         case "/balance":
           if (!sessionRef.current) {
-            addLine("system", "No active channel. Type /open to start.");
+            addLine("system", "No active session. Type /open to start.");
           } else {
             const dep = sessionRef.current.deposit;
             const sp = sessionRef.current.cumulativeAmount;
@@ -677,7 +678,7 @@ function App() {
       setTimeRemaining(remaining);
       if (remaining <= 0) {
         clearInterval(timerRef.current!);
-        addWarning("Channel expired. Auto-closing...");
+        addWarning("Session expired. Auto-closing...");
         handleClose();
       }
     }, 1000);
