@@ -112,8 +112,12 @@ function App() {
       commitmentRef.current = commitmentKp;
 
       // 3. Open channel on-chain via factory
-      const chanId = await openChannel(walletRef.current, commitmentKp);
+      const { channelAddress: chanId, txHash: openTxHash } = await openChannel(
+        walletRef.current,
+        commitmentKp,
+      );
       addLine("system", `Channel deployed: ${chanId}`);
+      addLine("system", `Open tx: https://stellar.expert/explorer/testnet/tx/${openTxHash}`);
 
       // 4. Register channel with the server
       addLine("system", "Registering channel with MPP server...");
@@ -143,7 +147,11 @@ function App() {
         return;
       }
 
-      // 5. Set up session
+      // 5. Set up session — use server's expiresAt as source of truth
+      const regBody = (await regRes.json()) as { expiresAt?: string };
+      const expiresAt = regBody.expiresAt
+        ? new Date(regBody.expiresAt).getTime()
+        : Date.now() + CONFIG.channelTtlMs;
       const session: ChannelSession = {
         channelId: chanId,
         commitmentKeyHex,
@@ -151,15 +159,21 @@ function App() {
         deposit: CONFIG.deposit,
         challenge,
         openedAt: Date.now(),
-        expiresAt: Date.now() + CONFIG.channelTtlMs,
+        expiresAt,
       };
       sessionRef.current = session;
       setChannelId(chanId);
       setBalance(CONFIG.deposit);
       setDeposit(CONFIG.deposit);
-      setTimeRemaining(CONFIG.channelTtlMs / 1000);
+      const ttlSeconds = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+      setTimeRemaining(ttlSeconds);
 
-      addLine("system", `Channel open! ${CONFIG.deposit.toString()} stroops loaded. Timer: 2:00`);
+      const ttlMin = Math.floor(ttlSeconds / 60);
+      const ttlSec = ttlSeconds % 60;
+      addLine(
+        "system",
+        `Channel open! ${CONFIG.deposit.toString()} stroops deposited. Timer: ${ttlMin}:${ttlSec.toString().padStart(2, "0")}`,
+      );
       addLine(
         "system",
         `Type a message to chat (${CONFIG.costPerToken.toString()} stroops per token).\n`,
@@ -183,21 +197,24 @@ function App() {
 
       // 1. Submit top_up tx on-chain
       const txHash = await topUpChannel(walletRef.current, session.channelId, CONFIG.deposit);
-      addLine("system", `Top-up tx submitted: ${txHash}`);
+      addLine("system", `Top-up tx: https://stellar.expert/explorer/testnet/tx/${txHash}`);
 
       // 2. Notify server
       const payload = buildTopupPayload(session.channelId, txHash);
       const res = await sendChat("", session, payload);
 
       if (res.ok) {
-        // Update session
+        const topupBody = (await res.json()) as { expiresAt?: string };
         const newBalance = await getChannelBalance(session.channelId);
+        const newExpiresAt = topupBody.expiresAt
+          ? new Date(topupBody.expiresAt).getTime()
+          : Date.now() + CONFIG.channelTtlMs;
         session.deposit = newBalance;
-        session.expiresAt = Date.now() + CONFIG.channelTtlMs;
+        session.expiresAt = newExpiresAt;
         setDeposit(newBalance);
         setBalance(newBalance - session.cumulativeAmount);
-        setTimeRemaining(CONFIG.channelTtlMs / 1000);
-        addLine("system", `Topped up! New balance: ${newBalance} stroops. Timer reset.`);
+        setTimeRemaining(Math.max(0, Math.floor((newExpiresAt - Date.now()) / 1000)));
+        addLine("system", `Topped up! Deposit now ${newBalance} stroops. Timer reset.`);
       } else {
         const body = (await res.json().catch(() => ({}))) as { detail?: string };
         addLine("error", `Server rejected top-up: ${body.detail || res.status}`);
@@ -215,6 +232,7 @@ function App() {
     }
 
     setDisabled(true);
+    addLine("system", "Closing channel...");
     try {
       const session = sessionRef.current;
 
@@ -239,20 +257,32 @@ function App() {
         const body = (await res.json()) as {
           status?: string;
           txHash?: string;
-          settledAmount?: string;
+          closedAmount?: string;
           actualSpend?: string;
         };
-        if (body.status === "already-settled") {
-          addLine("system", "Channel already settled by server.");
-        } else {
+        if (body.status === "already-closed") {
+          addLine("system", "Channel already closed by server.");
+        } else if (body.status === "closing") {
           addLine(
             "system",
-            `Channel settled: ${body.settledAmount || session.cumulativeAmount} stroops on-chain (actual spend: ${body.actualSpend || session.cumulativeAmount} stroops).`,
+            `Channel closing — server will finalize ${body.closedAmount || session.cumulativeAmount} stroops on-chain.`,
           );
-          if (body.txHash) {
-            addLine("system", `Settlement tx: ${body.txHash}`);
-            addLine("system", `View: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
+        } else if (body.status === "no-funds") {
+          addLine("system", "Channel closed. No charges.");
+        } else if (body.txHash) {
+          const closed = body.closedAmount || session.cumulativeAmount.toString();
+          const spent = body.actualSpend || session.cumulativeAmount.toString();
+          if (closed !== spent) {
+            addLine(
+              "system",
+              `Channel closed: ${closed} stroops on-chain (actual spend: ${spent} stroops).`,
+            );
+          } else {
+            addLine("system", `Channel closed: ${spent} stroops.`);
           }
+          addLine("system", `Close tx: https://stellar.expert/explorer/testnet/tx/${body.txHash}`);
+        } else {
+          addLine("system", "Channel closed.");
         }
       } else {
         const body = (await res.json().catch(() => ({ detail: "" }))) as { detail?: string };
@@ -310,7 +340,8 @@ function App() {
         const res = await sendChat(message, session, payload);
 
         if (res.status === 402) {
-          addLine("error", "Server returned 402. Challenge may have expired. Try /open again.");
+          const body = (await res.json().catch(() => ({ detail: "" }))) as { detail?: string };
+          addLine("error", `Payment rejected: ${body.detail || "verification failed"}`);
           setDisabled(false);
           return;
         }

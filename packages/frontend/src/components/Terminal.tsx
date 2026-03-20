@@ -1,9 +1,25 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, type ReactNode } from "react";
 
 export interface TerminalLine {
   id: number;
   type: "system" | "user" | "ai" | "error";
   content: string;
+}
+
+const URL_RE = /(https?:\/\/[^\s]+)/;
+
+function linkify(text: string): ReactNode {
+  const parts = text.split(new RegExp(URL_RE.source, "g"));
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    URL_RE.test(part) ? (
+      <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="underline">
+        {part}
+      </a>
+    ) : (
+      part
+    ),
+  );
 }
 
 interface TerminalProps {
@@ -61,7 +77,7 @@ export default function Terminal({
       >
         {lines.map((line) => (
           <div key={line.id} className={`whitespace-pre-wrap break-words ${colorClass(line.type)}`}>
-            {line.type === "user" ? `> ${line.content}` : line.content}
+            {line.type === "user" ? `> ${line.content}` : linkify(line.content)}
           </div>
         ))}
         {streamingText && (

@@ -1,6 +1,8 @@
 import {
   Contract,
+  type FeeBumpTransaction,
   Keypair,
+  type Transaction,
   TransactionBuilder,
   nativeToScVal,
   scValToNative,
@@ -9,6 +11,44 @@ import {
   Account,
 } from "@stellar/stellar-sdk";
 import { CONFIG } from "./config.js";
+
+const POLL_ATTEMPTS = 30;
+const SEND_RETRY_DELAY_MS = 2000;
+
+/** Submit a transaction with status handling and one retry on TRY_AGAIN_LATER. */
+async function sendTx(server: rpc.Server, tx: Transaction | FeeBumpTransaction): Promise<string> {
+  let result = await server.sendTransaction(tx);
+
+  if (result.status === "TRY_AGAIN_LATER") {
+    await new Promise((r) => setTimeout(r, SEND_RETRY_DELAY_MS));
+    result = await server.sendTransaction(tx);
+  }
+
+  if (result.status === "ERROR") {
+    throw new Error(
+      `Transaction rejected: ${result.errorResult?.result()?.switch().name ?? result.status}`,
+    );
+  }
+
+  return result.hash;
+}
+
+/** Poll for a confirmed transaction with exponential backoff. */
+async function pollTx(
+  server: rpc.Server,
+  hash: string,
+): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
+  const result = await server.pollTransaction(hash, {
+    attempts: POLL_ATTEMPTS,
+    sleepStrategy: rpc.BasicSleepStrategy,
+  });
+
+  if (result.status !== "SUCCESS") {
+    throw new Error(`Transaction failed: ${result.status}`);
+  }
+
+  return result as rpc.Api.GetSuccessfulTransactionResponse;
+}
 
 /** Convert Uint8Array to hex string (browser-safe, no Buffer needed). */
 export function toHex(bytes: Uint8Array): string {
@@ -52,11 +92,11 @@ async function simulateCall(contractId: string, method: string, args: any[] = []
   return retval;
 }
 
-/** Open a channel via the factory contract. Returns the channel contract address. */
+/** Open a channel via the factory contract. Returns the channel address and tx hash. */
 export async function openChannel(
   accountKeypair: Keypair,
   commitmentKeypair: Keypair,
-): Promise<string> {
+): Promise<{ channelAddress: string; txHash: string }> {
   const server = getServer();
   const factory = new Contract(CONFIG.factoryContractId);
 
@@ -86,26 +126,14 @@ export async function openChannel(
 
   const prepared = await server.prepareTransaction(tx);
   prepared.sign(accountKeypair);
-  const result = await server.sendTransaction(prepared);
-
-  if (result.status === "ERROR") {
-    throw new Error(`Transaction failed: ${result.status}`);
-  }
-
-  const txResult = await server.pollTransaction(result.hash, {
-    attempts: 30,
-    sleepStrategy: rpc.BasicSleepStrategy,
-  });
-
-  if (txResult.status !== "SUCCESS") {
-    throw new Error(`Transaction failed: ${txResult.status}`);
-  }
+  const hash = await sendTx(server, prepared);
+  const txResult = await pollTx(server, hash);
 
   // Extract channel address from the return value
   const returnVal = txResult.returnValue;
   if (!returnVal) throw new Error("No return value from open()");
   const channelAddress = Address.fromScVal(returnVal).toString();
-  return channelAddress;
+  return { channelAddress, txHash: hash };
 }
 
 /** Simulate prepare_commitment to get bytes to sign. */
@@ -136,22 +164,10 @@ export async function topUpChannel(
 
   const prepared = await server.prepareTransaction(tx);
   prepared.sign(accountKeypair);
-  const result = await server.sendTransaction(prepared);
+  const hash = await sendTx(server, prepared);
+  await pollTx(server, hash);
 
-  if (result.status === "ERROR") {
-    throw new Error(`Top-up transaction failed: ${result.status}`);
-  }
-
-  const txResult = await server.pollTransaction(result.hash, {
-    attempts: 30,
-    sleepStrategy: rpc.BasicSleepStrategy,
-  });
-
-  if (txResult.status !== "SUCCESS") {
-    throw new Error(`Top-up failed: ${txResult.status}`);
-  }
-
-  return result.hash;
+  return hash;
 }
 
 /** Get channel balance via simulation. */
