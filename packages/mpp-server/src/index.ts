@@ -1,7 +1,5 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { close } from "stellar-mpp-sdk/channel/server";
-import { Keypair } from "@stellar/stellar-sdk";
 import {
   createChallenge,
   paymentRequired,
@@ -91,7 +89,11 @@ app.post("/chat", async (c) => {
 
         return withReceipt(
           new Response(
-            JSON.stringify({ status: "channel-registered", channelId: payload.channelId }),
+            JSON.stringify({
+              status: "channel-registered",
+              channelId: payload.channelId,
+              expiresAt: result.expiresAt,
+            }),
             {
               status: 200,
               headers: { "Content-Type": "application/json" },
@@ -218,78 +220,30 @@ app.post("/chat", async (c) => {
         }
 
         return withReceipt(
-          new Response(JSON.stringify({ status: "topped-up", channelId: payload.channelId }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-          `topup:${payload.channelId}`,
-        );
-      }
-
-      case "close": {
-        const state = await channelDO.getState();
-
-        if (!state) {
-          return c.json({ status: "already-settled", channelId: payload.channelId }, 200);
-        }
-
-        // Determine which commitment to use for settlement
-        let closeAmount = state.maxAuthorizedAmount;
-        let closeSig = state.lastVoucherSig;
-
-        // If client provided a final voucher for actual spend, use it (tighter settlement)
-        if (payload.voucher) {
-          const finalAmount = BigInt(payload.voucher.amount);
-          if (finalAmount >= BigInt(state.cumulativeAmount) && finalAmount <= BigInt(state.deposit)) {
-            const valid = await channelDO.verifyCommitment(
-              payload.voucher.amount,
-              payload.voucher.signature,
-            );
-            if (valid) {
-              closeAmount = payload.voucher.amount;
-              closeSig = payload.voucher.signature;
-            }
-          }
-        }
-
-        let txHash: string | undefined;
-
-        if (closeAmount !== "0" && closeSig) {
-          try {
-            const closeKey = Keypair.fromSecret(c.env.SERVER_STELLAR_SECRET);
-            txHash = await close({
-              channel: payload.channelId,
-              amount: BigInt(closeAmount),
-              signature: Buffer.from(closeSig, "hex"),
-              closeKey,
-              network: "testnet",
-              rpcUrl: c.env.STELLAR_RPC_URL,
-            });
-            await channelDO.clear();
-          } catch (err) {
-            console.error(`On-chain close failed for ${payload.channelId}:`, err);
-            // State preserved — alarm will retry settlement
-          }
-        } else {
-          // No funds to settle — clean up
-          await channelDO.clear();
-        }
-
-        return withReceipt(
           new Response(
             JSON.stringify({
-              status: "settled",
+              status: "topped-up",
               channelId: payload.channelId,
-              settledAmount: closeAmount,
-              actualSpend: state.cumulativeAmount,
-              txHash,
+              expiresAt: result.expiresAt,
             }),
             {
               status: 200,
               headers: { "Content-Type": "application/json" },
             },
           ),
-          `close:${txHash || payload.channelId}`,
+          `topup:${payload.channelId}`,
+        );
+      }
+
+      case "close": {
+        const result = await channelDO.close(payload.voucher);
+
+        return withReceipt(
+          new Response(JSON.stringify({ ...result, channelId: payload.channelId }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+          `close:${result.txHash || payload.channelId}`,
         );
       }
 

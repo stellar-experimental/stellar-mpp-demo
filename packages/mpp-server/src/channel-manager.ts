@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { Keypair } from "@stellar/stellar-sdk";
-import { close } from "stellar-mpp-sdk/channel/server";
+import { close as closeChannel } from "stellar-mpp-sdk/channel/server";
 import * as stellar from "./stellar.js";
 
 export interface ChannelState {
@@ -17,11 +17,15 @@ export interface ChannelState {
 }
 
 const CHANNEL_TTL_MS = 120_000; // 2 minutes
+const ALARM_GRACE_MS = 5_000; // alarm fires after expiry to let client close with tighter voucher first
 const RATE_LIMIT_MS = 3_000; // 1 message per 3 seconds
 
 export class ChannelManager extends DurableObject<Env> {
   /** Register a new channel: verify on-chain, store state, schedule auto-close. */
-  async open(channelId: string, commitmentKey: string): Promise<{ error?: string }> {
+  async open(
+    channelId: string,
+    commitmentKey: string,
+  ): Promise<{ error?: string; expiresAt?: string }> {
     const existing = await this.ctx.storage.get<ChannelState>("state");
     if (existing) {
       return { error: "Channel already registered" };
@@ -68,8 +72,8 @@ export class ChannelManager extends DurableObject<Env> {
     };
 
     await this.ctx.storage.put("state", state);
-    await this.ctx.storage.setAlarm(new Date(state.expiresAt).getTime());
-    return {};
+    await this.ctx.storage.setAlarm(new Date(state.expiresAt).getTime() + ALARM_GRACE_MS);
+    return { expiresAt: state.expiresAt };
   }
 
   /** Get current channel state. */
@@ -140,7 +144,7 @@ export class ChannelManager extends DurableObject<Env> {
   }
 
   /** Verify a top-up on-chain and update deposit + TTL. */
-  async topup(): Promise<{ error?: string }> {
+  async topup(): Promise<{ error?: string; expiresAt?: string }> {
     const state = await this.ctx.storage.get<ChannelState>("state");
     if (!state) {
       return { error: "Channel not found" };
@@ -160,56 +164,98 @@ export class ChannelManager extends DurableObject<Env> {
     state.deposit = newBalance.toString();
     state.expiresAt = new Date(Date.now() + CHANNEL_TTL_MS).toISOString();
     await this.ctx.storage.put("state", state);
-    await this.ctx.storage.setAlarm(new Date(state.expiresAt).getTime());
-    return {};
+    await this.ctx.storage.setAlarm(new Date(state.expiresAt).getTime() + ALARM_GRACE_MS);
+    return { expiresAt: state.expiresAt };
   }
 
-  /** Verify a commitment signature for a given amount (used for close vouchers). */
-  async verifyCommitment(amount: string, signature: string): Promise<boolean> {
+  /**
+   * Close the channel on-chain and clean up.
+   * Called by both the client close request and the alarm.
+   * Uses a storage flag to prevent concurrent on-chain submissions —
+   * the first caller claims the close, the second returns immediately.
+   */
+  async close(voucher?: { amount: string; signature: string }): Promise<{
+    status: "closed" | "already-closed" | "closing" | "no-funds";
+    txHash?: string;
+    closedAmount?: string;
+    actualSpend?: string;
+  }> {
     const state = await this.ctx.storage.get<ChannelState>("state");
-    if (!state) return false;
-    const server = stellar.createServer(this.env.STELLAR_RPC_URL);
-    const commitmentBytes = await stellar.prepareCommitment(
-      server,
-      state.contractAddress,
-      BigInt(amount),
-      this.env.STELLAR_NETWORK_PASSPHRASE,
-    );
-    return stellar.verifySignature(state.commitmentKey, commitmentBytes, signature);
-  }
-
-  /** Clear all storage and cancel alarm. */
-  async clear(): Promise<void> {
-    await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.deleteAll();
-  }
-
-  /** Auto-close alarm: settle on-chain and clean up. */
-  async alarm() {
-    const state = await this.ctx.storage.get<ChannelState>("state");
-
     if (!state) {
+      return { status: "already-closed" };
+    }
+
+    // Claim the close — if already closing, return immediately
+    const closing = await this.ctx.storage.get<boolean>("closing");
+    if (closing) {
+      return {
+        status: "closing",
+        closedAmount: state.maxAuthorizedAmount,
+        actualSpend: state.cumulativeAmount,
+      };
+    }
+    await this.ctx.storage.put("closing", true);
+
+    let closeAmount = state.maxAuthorizedAmount;
+    let closeSig = state.lastVoucherSig;
+
+    // If client provided a final voucher for actual spend, verify and use it
+    if (voucher) {
+      const finalAmount = BigInt(voucher.amount);
+      if (finalAmount >= BigInt(state.cumulativeAmount) && finalAmount <= BigInt(state.deposit)) {
+        const server = stellar.createServer(this.env.STELLAR_RPC_URL);
+        const commitmentBytes = await stellar.prepareCommitment(
+          server,
+          state.contractAddress,
+          finalAmount,
+          this.env.STELLAR_NETWORK_PASSPHRASE,
+        );
+        if (stellar.verifySignature(state.commitmentKey, commitmentBytes, voucher.signature)) {
+          closeAmount = voucher.amount;
+          closeSig = voucher.signature;
+        }
+      }
+    }
+
+    if (closeAmount === "0" || !closeSig) {
+      await this.ctx.storage.deleteAlarm();
       await this.ctx.storage.deleteAll();
-      return;
+      return { status: "no-funds", actualSpend: state.cumulativeAmount };
     }
 
     try {
-      if (state.maxAuthorizedAmount !== "0" && state.lastVoucherSig) {
-        const closeKey = Keypair.fromSecret(this.env.SERVER_STELLAR_SECRET);
-        await close({
-          channel: state.contractAddress,
-          amount: BigInt(state.maxAuthorizedAmount),
-          signature: Buffer.from(state.lastVoucherSig, "hex"),
-          closeKey,
-          network: "testnet",
-          rpcUrl: this.env.STELLAR_RPC_URL,
-        });
-      }
+      const closeKey = Keypair.fromSecret(this.env.SERVER_STELLAR_SECRET);
+      const txHash = await closeChannel({
+        channel: state.contractAddress,
+        amount: BigInt(closeAmount),
+        signature: Buffer.from(closeSig, "hex"),
+        closeKey,
+        network: "testnet",
+        rpcUrl: this.env.STELLAR_RPC_URL,
+      });
+      await this.ctx.storage.deleteAlarm();
       await this.ctx.storage.deleteAll();
+      return {
+        status: "closed",
+        txHash,
+        closedAmount: closeAmount,
+        actualSpend: state.cumulativeAmount,
+      };
     } catch (err) {
-      console.error(`Auto-close on-chain failed for ${state.contractAddress}:`, err);
-      // Retry in 30 seconds — state preserved so we don't lose settlement data
+      console.error(`On-chain close failed for ${state.contractAddress}:`, err);
+      // Clear lock so alarm retry can attempt again
+      await this.ctx.storage.delete("closing");
       await this.ctx.storage.setAlarm(Date.now() + 30_000);
+      return {
+        status: "closing",
+        closedAmount: closeAmount,
+        actualSpend: state.cumulativeAmount,
+      };
     }
+  }
+
+  /** Auto-close alarm: delegates to close(). */
+  async alarm() {
+    await this.close();
   }
 }
