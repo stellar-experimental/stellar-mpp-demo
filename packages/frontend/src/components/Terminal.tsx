@@ -119,6 +119,18 @@ function Terminal({
           spellCheck={false}
           autoComplete="off"
         />
+        <button
+          type="button"
+          data-testid="terminal-submit"
+          onClick={() => {
+            if (!disabled) onSubmit();
+          }}
+          disabled={disabled}
+          className="sr-only"
+          aria-label="Submit terminal input"
+        >
+          Send
+        </button>
       </div>
     </>
   );

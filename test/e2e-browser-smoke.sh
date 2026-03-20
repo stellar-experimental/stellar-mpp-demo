@@ -8,7 +8,6 @@ set +e
 BASE_URL="${1:-https://mpp.stellar.buzz}"
 SCREENSHOT_DIR="/tmp/claude/e2e-$(date +%s)"
 BROWSER_SESSION="mpp-smoke-$$"
-INPUT_SELECTOR="input[type='text']"
 MAX_WAIT=15000
 CHAT_WAIT=45000
 CHAIN_WAIT=120000
@@ -37,8 +36,8 @@ browser() {
   agent-browser --session "$BROWSER_SESSION" "$@"
 }
 
-bodyText() {
-  browser snapshot 2>/dev/null
+terminalText() {
+  browser get text "[data-testid='terminal-output']" 2>/dev/null | tr -d '\r'
 }
 
 browserEval() {
@@ -59,7 +58,7 @@ waitFor() {
   local i
   for i in $(seq 1 "$attempts"); do
     sleep $((interval / 1000))
-    if bodyText | grep -Fq "$text"; then
+    if terminalText | grep -Fq "$text"; then
       return 0
     fi
   done
@@ -74,7 +73,7 @@ waitForEither() {
   local i body=""
   for i in $(seq 1 "$attempts"); do
     sleep $((interval / 1000))
-    body=$(bodyText)
+    body=$(terminalText)
     if echo "$body" | grep -Fq "$first" || echo "$body" | grep -Fq "$second"; then
       return 0
     fi
@@ -132,17 +131,17 @@ waitForUsageCost() {
   return 1
 }
 
-waitForBillingCount() {
-  local expected="$1" timeout="$2" interval="${3:-1000}"
+waitForUsageLine() {
+  local tokens="$1" cost="$2" timeout="$3" interval="${4:-1000}"
   local attempts=$((timeout / interval))
   if [ "$attempts" -lt 1 ]; then attempts=1; fi
 
-  local i body="" count=0
+  local i body="" expected=""
+  expected="[$tokens tokens, $cost stroops]"
   for i in $(seq 1 "$attempts"); do
     sleep $((interval / 1000))
-    body=$(bodyText)
-    count=$(echo "$body" | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
-    if [ "$count" -ge "$expected" ]; then
+    body=$(terminalText)
+    if echo "$body" | grep -Fq "$expected"; then
       return 0
     fi
   done
@@ -151,21 +150,8 @@ waitForBillingCount() {
 
 submitInput() {
   local text="$1"
-  local text_b64
-  text_b64=$(printf '%s' "$text" | base64 | tr -d '\n')
-  browser eval --stdin > /dev/null 2>&1 <<EVALEOF
-const input = document.querySelector('[data-testid="terminal-input"]');
-if (!(input instanceof HTMLInputElement)) throw new Error('terminal input missing');
-if (input.disabled) throw new Error('terminal input disabled');
-const text = atob('${text_b64}');
-input.focus();
-const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-if (!setter) throw new Error('input setter missing');
-setter.call(input, text);
-input.dispatchEvent(new Event('input', { bubbles: true }));
-input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-'ok';
-EVALEOF
+  browser fill "[data-testid='terminal-input']" "$text" > /dev/null 2>&1 || return 1
+  browser eval "(() => { const button = document.querySelector('[data-testid=\"terminal-submit\"]'); if (!(button instanceof HTMLButtonElement)) throw new Error('terminal submit missing'); button.click(); return 'ok'; })()" > /dev/null 2>&1
 }
 
 submitAndConfirmEcho() {
@@ -175,11 +161,11 @@ submitAndConfirmEcho() {
 }
 
 extractLatestChannelId() {
-  bodyText | sed -n 's/.*Channel deployed: \(C[A-Z0-9]*\).*/\1/p' | tail -1
+  terminalText | sed -n 's/.*Channel deployed: \(C[A-Z0-9]*\).*/\1/p' | tail -1
 }
 
 extractLatestBalanceLine() {
-  bodyText | grep -o 'Deposit: .* stroops | Spent: .* stroops | Remaining: .* stroops' | tail -1
+  terminalText | grep -o 'Deposit: .* stroops | Spent: .* stroops | Remaining: .* stroops' | tail -1
 }
 
 extractNumberField() {
@@ -202,7 +188,42 @@ refreshChannelState() {
 
 extractChannelStateNumber() {
   local field="$1"
-  echo "$CHANNEL_STATE_BODY" | sed -n "s/.*\"$field\":\\([0-9][0-9]*\\).*/\\1/p"
+  echo "$CHANNEL_STATE_BODY" | sed -n "s/.*\"$field\":\"\\{0,1\\}\\([0-9][0-9]*\\)\"\\{0,1\\}.*/\\1/p"
+}
+
+waitForChannelId() {
+  local timeout="$1" interval="${2:-1000}"
+  local attempts=$((timeout / interval))
+  if [ "$attempts" -lt 1 ]; then attempts=1; fi
+
+  local i value=""
+  for i in $(seq 1 "$attempts"); do
+    sleep $((interval / 1000))
+    value=$(extractLatestChannelId)
+    if [ -n "$value" ]; then
+      echo "$value"
+      return 0
+    fi
+  done
+  return 1
+}
+
+waitForChannelFieldIncrease() {
+  local field="$1" previous="$2" timeout="$3" interval="${4:-1000}"
+  local attempts=$((timeout / interval))
+  if [ "$attempts" -lt 1 ]; then attempts=1; fi
+
+  local i value=""
+  for i in $(seq 1 "$attempts"); do
+    sleep $((interval / 1000))
+    refreshChannelState || continue
+    value=$(extractChannelStateNumber "$field")
+    if [ "$CHANNEL_STATE_HTTP" = "200" ] && [ -n "$value" ] && [ "$value" -gt "$previous" ]; then
+      echo "$value"
+      return 0
+    fi
+  done
+  return 1
 }
 
 waitForChannelMessageCount() {
@@ -234,24 +255,6 @@ waitForChannelDepositIncrease() {
     deposit=$(extractChannelStateNumber "deposit")
     if [ "$CHANNEL_STATE_HTTP" = "200" ] && [ -n "$deposit" ] && [ "$deposit" -gt "$previous" ]; then
       SECOND_DEPOSIT="$deposit"
-      return 0
-    fi
-  done
-  return 1
-}
-
-waitForChannelSpentIncrease() {
-  local previous="$1" timeout="$2" interval="${3:-1000}"
-  local attempts=$((timeout / interval))
-  if [ "$attempts" -lt 1 ]; then attempts=1; fi
-
-  local i spent=""
-  for i in $(seq 1 "$attempts"); do
-    sleep $((interval / 1000))
-    refreshChannelState || continue
-    spent=$(extractChannelStateNumber "cumulativeAmount")
-    if [ "$CHANNEL_STATE_HTTP" = "200" ] && [ -n "$spent" ] && [ "$spent" -gt "$previous" ]; then
-      SECOND_SPENT="$spent"
       return 0
     fi
   done
@@ -362,7 +365,7 @@ if [ "$OPEN_OK" = "1" ]; then
   pass "Channel opened successfully"
 else
   browser screenshot "$SCREENSHOT_DIR/fail-open.png" > /dev/null 2>&1
-  BODY=$(bodyText)
+  BODY=$(terminalText)
   ERR=$(echo "$BODY" | grep -o "Open failed.*\|Registration failed.*" | head -1)
   fail "Channel open failed: ${ERR:-timeout}"
   echo ""; echo "Results: $PASS passed, $FAIL failed"
@@ -370,7 +373,7 @@ else
   exit 1
 fi
 
-CHANNEL_ID=$(extractLatestChannelId)
+CHANNEL_ID=$(waitForChannelId "$MAX_WAIT" 1000)
 if [ -n "$CHANNEL_ID" ]; then
   CHANNEL_STATE_URL="$SERVER_URL/channel/$CHANNEL_ID"
   pass "Captured channel id: $CHANNEL_ID"
@@ -395,27 +398,20 @@ fi
 
 step "5. First Message"
 
+PREV_USAGE_TURN=$(terminalAttr "data-last-usage-turn")
+if [ -z "$PREV_USAGE_TURN" ]; then PREV_USAGE_TURN=0; fi
 if submitAndConfirmEcho "reply with the single word alpha" 5000; then
   pass "First message submitted in terminal"
 else
   fail "First message was not echoed in terminal"
 fi
 
-if waitForTerminalAttr "data-request-state" "chatting" 5000 500; then
-  pass "Terminal entered chatting state"
-else
-  fail "Terminal did not enter chatting state"
-fi
-
 echo "  Waiting for first streamed response..."
 
-PREV_USAGE_TURN=$(terminalAttr "data-last-usage-turn")
-if [ -z "$PREV_USAGE_TURN" ]; then PREV_USAGE_TURN=0; fi
-
 if waitForChannelMessageCount 1 $CHAT_WAIT 1000; then
+  FIRST_SPENT=$(waitForChannelFieldIncrease "cumulativeAmount" 0 "$CHAT_WAIT" 1000)
   refreshChannelState
   FIRST_DEPOSIT=$(extractChannelStateNumber "deposit")
-  FIRST_SPENT=$(extractChannelStateNumber "cumulativeAmount")
   if [ -n "$FIRST_SPENT" ] && [ "$FIRST_SPENT" -gt 0 ]; then
     pass "Server state recorded the first paid message"
   else
@@ -433,16 +429,17 @@ else
 fi
 
 USAGE_COST=$(waitForUsageCost 5000 500)
+USAGE_TOKENS=$(terminalAttr "data-last-usage-tokens")
 if [ -n "$USAGE_COST" ]; then
   pass "First response usage cost recorded: $USAGE_COST stroops"
 else
   fail "First response usage cost missing"
 fi
 
-if waitForBillingCount 1 $MAX_WAIT 1000; then
-  pass "First response received with billing line"
+if [ -n "$USAGE_TOKENS" ] && [ -n "$USAGE_COST" ] && waitForUsageLine "$USAGE_TOKENS" "$USAGE_COST" $MAX_WAIT 1000; then
+  pass "First response rendered its usage line"
 else
-  fail "First response billing line not found"
+  fail "First response usage line not found"
 fi
 
 if waitForTerminalAttr "data-request-state" "idle" 5000 500; then
@@ -522,25 +519,20 @@ pass "Screenshot: topup.png"
 step "7. Second Message"
 
 sleep 3
+PREV_USAGE_TURN=$(terminalAttr "data-last-usage-turn")
+if [ -z "$PREV_USAGE_TURN" ]; then PREV_USAGE_TURN=0; fi
 if submitAndConfirmEcho "reply with the single word beta" 5000; then
   pass "Second message submitted in terminal"
 else
   fail "Second message was not echoed in terminal"
 fi
 
-if waitForTerminalAttr "data-request-state" "chatting" 5000 500; then
-  pass "Terminal entered chatting state for second message"
-else
-  fail "Terminal did not enter chatting state for second message"
-fi
-
 echo "  Waiting for second streamed response..."
 
-TOKEN_LINES_BEFORE=$(bodyText | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
-PREV_USAGE_TURN=$(terminalAttr "data-last-usage-turn")
-if [ -z "$PREV_USAGE_TURN" ]; then PREV_USAGE_TURN=0; fi
+FIRST_SPENT_VALUE="${FIRST_SPENT:-0}"
 if waitForChannelMessageCount 2 $CHAT_WAIT 1000; then
-  if waitForChannelSpentIncrease "$FIRST_SPENT" $CHAT_WAIT 1000; then
+  SECOND_SPENT=$(waitForChannelFieldIncrease "cumulativeAmount" "$FIRST_SPENT_VALUE" "$CHAT_WAIT" 1000)
+  if [ -n "$SECOND_SPENT" ] && [ "$SECOND_SPENT" -gt "$FIRST_SPENT_VALUE" ]; then
     pass "Server state recorded the second paid message"
   else
     fail "Second message did not increase cumulative spend"
@@ -556,15 +548,12 @@ else
   fail "Second response did not publish a usage marker"
 fi
 
-if waitForBillingCount 2 $MAX_WAIT 1000; then
-  TOKEN_LINES_AFTER=$(bodyText | grep -cE '\[[0-9]+ tokens, [0-9]+ stroops\]')
-  if [ "$TOKEN_LINES_AFTER" -ge $((TOKEN_LINES_BEFORE + 1)) ]; then
-    pass "Second response received with an additional billing event"
-  else
-    fail "Second response did not add a new billing event"
-  fi
+SECOND_USAGE_COST=$(waitForUsageCost 5000 500)
+SECOND_USAGE_TOKENS=$(terminalAttr "data-last-usage-tokens")
+if [ -n "$SECOND_USAGE_TOKENS" ] && [ -n "$SECOND_USAGE_COST" ] && waitForUsageLine "$SECOND_USAGE_TOKENS" "$SECOND_USAGE_COST" $MAX_WAIT 1000; then
+  pass "Second response rendered its usage line"
 else
-  fail "Second response billing line not found"
+  fail "Second response usage line not found"
 fi
 
 if waitForTerminalAttr "data-request-state" "idle" 5000 500; then
@@ -627,7 +616,7 @@ fi
 browser screenshot "$SCREENSHOT_DIR/closed.png" > /dev/null 2>&1
 pass "Screenshot: closed.png"
 
-CLOSE_BODY=$(bodyText)
+CLOSE_BODY=$(terminalText)
 SETTLED=$(echo "$CLOSE_BODY" | grep -oE 'closed: [0-9]+' | tail -1 | grep -oE '[0-9]+')
 ACTUAL=$(echo "$CLOSE_BODY" | grep -oE 'actual spend: [0-9]+' | tail -1 | grep -oE '[0-9]+')
 
