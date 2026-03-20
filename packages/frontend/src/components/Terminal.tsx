@@ -71,13 +71,13 @@ function Terminal({
   const inputRef = useRef<HTMLInputElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const previousLastLineRef = useRef<TerminalLine | null>(null);
-  const [isCompact, setIsCompact] = useState(false);
+  const [isTouchLayout, setIsTouchLayout] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const media = window.matchMedia("(max-width: 520px)");
-    const sync = () => setIsCompact(media.matches);
+    const media = window.matchMedia("(max-width: 900px)");
+    const sync = () => setIsTouchLayout(media.matches);
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
@@ -167,7 +167,7 @@ function Terminal({
         )}
       </div>
       <div className="shrink-0 border-t border-neutral-700 px-3 py-3 max-[520px]:sticky max-[520px]:bottom-0 max-[520px]:z-10 max-[520px]:border-neutral-800 max-[520px]:bg-neutral-950/95 max-[520px]:backdrop-blur max-[520px]:supports-[padding:max(0px)]:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div className="mb-2 min-[521px]:hidden">
+        <div className="mb-2 min-[901px]:hidden">
           <div
             className="command-strip flex gap-1.5 overflow-x-auto pb-1"
             aria-label="Quick command panel"
@@ -188,7 +188,7 @@ function Terminal({
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/80 px-2 py-2 min-[521px]:rounded-none min-[521px]:border-0 min-[521px]:bg-transparent min-[521px]:px-0 min-[521px]:py-0">
+        <div className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/80 px-2 py-2 min-[901px]:rounded-none min-[901px]:border-0 min-[901px]:bg-transparent min-[901px]:px-0 min-[901px]:py-0">
           <span className="shrink-0 text-cyan-300" aria-hidden="true">
             {">"}
           </span>
@@ -207,7 +207,7 @@ function Terminal({
             placeholder={
               disabled
                 ? "Processing..."
-                : isCompact
+                : isTouchLayout
                   ? "Message or /open"
                   : "Type a message, /wtf, /help, or /open"
             }
@@ -222,7 +222,7 @@ function Terminal({
               if (!disabled) onSubmit();
             }}
             disabled={disabled || !input.trim()}
-            className="shrink-0 rounded border border-cyan-500/50 bg-cyan-500/10 px-3 py-1.5 text-sm font-medium text-cyan-200 transition hover:bg-cyan-500/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:border-neutral-700 disabled:bg-neutral-900 disabled:text-neutral-500 min-[521px]:border-neutral-700 min-[521px]:bg-transparent min-[521px]:text-neutral-300 min-[521px]:hover:bg-neutral-900"
+            className="shrink-0 rounded border border-cyan-500/50 bg-cyan-500/10 px-3 py-1.5 text-sm font-medium text-cyan-200 transition hover:bg-cyan-500/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:border-neutral-700 disabled:bg-neutral-900 disabled:text-neutral-500 min-[901px]:hidden"
             aria-label="Submit terminal input"
           >
             Send
