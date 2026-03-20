@@ -39,9 +39,13 @@ mpp-channel-demo/
 ├── packages/
 │   ├── frontend/           # CLI terminal web UI
 │   ├── mpp-server/         # MPP protocol gateway (HTTP 402)
-│   ├── ai-worker/          # Cloudflare Workers AI inference
+│   └── ai-worker/          # Cloudflare Workers AI inference
+├── submodules/
 │   ├── stellar-mpp-sdk/    # Stellar payment method for MPP (workspace package)
-│   └── contract/           # Soroban one-way-channel + factory (git submodule)
+│   └── one-way-channel/    # Soroban one-way-channel + factory (git submodule)
+├── test/
+│   ├── e2e-protocol-smoke.ts
+│   └── e2e-browser-smoke.sh
 ├── SPEC.md
 ├── PLAN.md
 ├── AGENTS.md
@@ -49,7 +53,7 @@ mpp-channel-demo/
 └── pnpm-workspace.yaml
 ```
 
-Each package is independently deployable. Frontend is a Cloudflare Worker (TanStack Start). MPP Server and AI Worker are Hono-based Cloudflare Workers. `stellar-mpp-sdk` is a workspace package providing the Stellar payment method for MPP. Contract is Rust/Soroban (included as a git submodule).
+Each service is independently deployable. Frontend is a Cloudflare Worker (TanStack Start). MPP Server and AI Worker are Hono-based Cloudflare Workers. `stellar-mpp-sdk` is a workspace package in `submodules/stellar-mpp-sdk`. The Soroban contracts live in `submodules/one-way-channel`.
 
 ---
 
@@ -190,7 +194,7 @@ data: [DONE]\n\n
 - No conversation history beyond current message + system prompt (limits input tokens)
 - Estimated max cost per channel: ~5000 output tokens * $0.335/M = $0.0017 (~$0.17/100 channels)
 
-### 4. Contract (`packages/contract`)
+### 4. Contract (`submodules/one-way-channel`)
 
 **Stack:** Rust, Soroban SDK
 

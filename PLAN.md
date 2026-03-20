@@ -1,18 +1,25 @@
-# MPP Channel Demo — Implementation Plan
+# MPP Channel Demo — Delivery Plan
+
+This plan describes the intended shape of the demo as a working, forward-maintained system. Script names, repo layout, and validation steps below reflect the current conventions in the repository.
 
 ## Phase 0: Monorepo Setup
 
-**Goal:** Restructure from single TanStack app to pnpm workspace monorepo.
+**Goal:** Maintain a pnpm workspace monorepo with clear service boundaries and root workflows.
 
 1. Create `pnpm-workspace.yaml` with `packages/*`
 2. Move existing TanStack Start app into `packages/frontend/`
 3. Scaffold `packages/mpp-server/` — Hono + Cloudflare Worker
 4. Scaffold `packages/ai-worker/` — Hono + Cloudflare Worker with AI binding
-5. Add `stellar-experimental/one-way-channel` as a git submodule at `packages/contract/`
-6. Root `package.json` with shared scripts: `dev`, `build`, `deploy`
+5. Add `stellar-experimental/one-way-channel` and `stellar-mpp-sdk` as git submodules under `submodules/`
+6. Root `package.json` with shared scripts:
+   - `dev`, `dev:frontend`, `dev:mpp-server`, `dev:ai-worker`
+   - `build`, `build:stellar-mpp-sdk`
+   - `deploy:all`
+   - `test:unit`, `test:smoke:local`, `test:smoke:remote`
+   - `test:smoke:browser:local`, `test:smoke:browser:remote`
 7. Verify all three workers run locally with `wrangler dev`
 
-**Deliverable:** `pnpm dev` starts all services. Each has its own `wrangler.jsonc`.
+**Deliverable:** `pnpm dev` starts all services. Each has its own `wrangler.jsonc`. Root scripts are explicit about service, environment, and test driver.
 
 ---
 
@@ -148,11 +155,33 @@
 2. Deploy MPP Server to Cloudflare
 3. Deploy Frontend to Cloudflare
 4. Configure custom domain (optional)
-5. Test full flow on deployed environment
+5. Test full flow on deployed environment with:
+   - `pnpm run test:smoke:remote` for protocol-level end-to-end coverage
+   - `pnpm run test:smoke:browser:remote` for browser/UI coverage
 6. Add welcome message to terminal explaining the demo
 7. Add a "View on Stellar Expert" link for the settlement transaction
 
 **Deliverable:** Live, shareable demo URL.
+
+---
+
+## Validation Strategy
+
+Validation is part of the product surface, not an afterthought.
+
+1. `pnpm run test:unit`
+   - Package-level Vitest coverage for frontend, mpp-server, ai-worker, and `stellar-mpp-sdk`
+2. `pnpm run test:smoke:local`
+   - Direct protocol smoke test against local URLs
+   - Verifies health checks, 402 challenge flow, channel open, two paid chats, top-up, close, close tx reporting, and post-close cleanup
+3. `pnpm run test:smoke:remote`
+   - Same protocol smoke against deployed services
+4. `pnpm run test:smoke:browser:local`
+   - Browser-driven smoke for terminal interaction and UI state markers
+5. `pnpm run test:smoke:browser:remote`
+   - Browser-driven smoke against the deployed app
+
+The protocol smoke test is the canonical lifecycle verification because it covers the financially important path directly, including the close transaction.
 
 ---
 

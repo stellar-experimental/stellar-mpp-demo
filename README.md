@@ -19,9 +19,10 @@ Frontend (CLI Terminal) ──HTTP──▶ MPP Server (402 Gateway) ──HTTP�
 packages/
 ├── frontend/           # CLI terminal web UI (TanStack Start + Cloudflare Workers)
 ├── mpp-server/         # MPP protocol gateway with HTTP 402 (Hono + Cloudflare Workers)
-├── ai-worker/          # Cloudflare Workers AI inference (Hono)
+└── ai-worker/          # Cloudflare Workers AI inference (Hono)
+submodules/
 ├── stellar-mpp-sdk/    # Stellar payment method for MPP (workspace package)
-└── contract/           # Soroban one-way-channel + factory (Rust, git submodule)
+└── one-way-channel/    # Soroban one-way-channel + factory (Rust, git submodule)
 ```
 
 ## Getting Started
@@ -35,6 +36,21 @@ This starts all three services concurrently:
 - Frontend: http://localhost:3000
 - MPP Server: http://localhost:8787
 - AI Worker: http://localhost:8788
+
+Useful root commands:
+
+```bash
+pnpm dev
+pnpm run dev:frontend
+pnpm run dev:mpp-server
+pnpm run dev:ai-worker
+pnpm run test:unit
+pnpm run test:smoke:local
+pnpm run test:smoke:remote
+pnpm run test:smoke:browser:local
+pnpm run test:smoke:browser:remote
+pnpm run deploy:all
+```
 
 ## How It Works
 
@@ -72,14 +88,22 @@ If the recipient/server goes offline, the funder can initiate `close_start()` wh
 
 The contract exposes getters for the funder address, total deposited amount, total withdrawn amount, and the refund waiting period. The demo uses `balance`, `to`, and `token` but not these.
 
-See [packages/contract/README.md](packages/contract/README.md) for the full contract API, state diagram, and security model.
+See [submodules/one-way-channel/README.md](submodules/one-way-channel/README.md) for the full contract API, state diagram, and security model.
+
+## Testing
+
+The repo keeps two smoke-test layers:
+
+- `pnpm run test:smoke:local` and `pnpm run test:smoke:remote` run the protocol smoke test in TypeScript without browser automation. They verify health checks, 402 challenge flow, real channel open, two paid chats, top-up, close, close tx reporting, and channel cleanup.
+- `pnpm run test:smoke:browser:local` and `pnpm run test:smoke:browser:remote` run the browser-driven smoke test for terminal/UI behavior and end-to-end interaction coverage.
+- `pnpm run test:unit` runs the package-level Vitest suites across the workspace.
 
 ## Deployment
 
 All TypeScript services deploy to Cloudflare Workers:
 
 ```bash
-pnpm deploy
+pnpm run deploy:all
 ```
 
 See [SPEC.md](SPEC.md) for the full specification, [AGENTS.md](AGENTS.md) for service reference, and [PLAN.md](PLAN.md) for the implementation plan.

@@ -11,8 +11,8 @@ Reference document for building and maintaining this monorepo. Each section cove
 | Frontend | `packages/frontend` | Cloudflare Worker (TanStack Start) | 3000 | CLI terminal UI, sessionStorage wallet, commitment signing |
 | MPP Server | `packages/mpp-server` | Cloudflare Worker (Hono) | 8787 | HTTP 402 gateway (stellar-mpp-sdk + mppx), channel state, settlement |
 | AI Worker | `packages/ai-worker` | Cloudflare Worker (Hono) | 8788 | Workers AI inference (streaming) |
-| stellar-mpp-sdk | `packages/stellar-mpp-sdk` | Workspace package | — | Stellar payment method for MPP (channel close, charge) |
-| Contract | `packages/contract` | Soroban (Stellar Testnet) | — | On-chain channel open/close/settle (git submodule) |
+| stellar-mpp-sdk | `submodules/stellar-mpp-sdk` | Workspace package | — | Stellar payment method for MPP (channel close, charge) |
+| Contract | `submodules/one-way-channel` | Soroban (Stellar Testnet) | — | On-chain channel open/close/settle (git submodule) |
 
 ---
 
@@ -225,18 +225,33 @@ All three TypeScript services deploy to Cloudflare Workers.
 
 ```bash
 # From repo root
-pnpm --filter ai-worker deploy        # Deploy AI Worker first
-pnpm --filter mpp-server deploy       # Then MPP Server
-pnpm --filter frontend deploy         # Then Frontend
+pnpm run deploy:all
 ```
 
 Contract deployment uses Stellar CLI:
 ```bash
-cd packages/contract
+cd submodules/one-way-channel
 stellar contract build
 stellar contract install --wasm target/wasm32-unknown-unknown/release/one_way_channel.wasm --network testnet
 stellar contract deploy --wasm target/wasm32-unknown-unknown/release/channel_factory.wasm --network testnet -- --admin <key> --wasm_hash <hash>
 ```
+
+## Root Workflows
+
+```bash
+pnpm dev
+pnpm run dev:frontend
+pnpm run dev:mpp-server
+pnpm run dev:ai-worker
+
+pnpm run test:unit
+pnpm run test:smoke:local
+pnpm run test:smoke:remote
+pnpm run test:smoke:browser:local
+pnpm run test:smoke:browser:remote
+```
+
+The protocol smoke test is the canonical lifecycle verification. It exercises health checks, the 402 challenge flow, real channel open, two paid chats, top-up, close, close tx reporting, and channel cleanup.
 
 ---
 
