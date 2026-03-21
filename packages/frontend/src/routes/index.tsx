@@ -22,7 +22,7 @@ import {
   buildClosePayload,
   type ChannelSession,
 } from "../lib/mpp-client";
-import wtfMarkdown from "../content/wtf.md?raw";
+import tourMarkdown from "../content/tour.md?raw";
 
 export const Route = createFileRoute("/")({ component: App });
 
@@ -35,9 +35,9 @@ type RequestState = "idle" | "opening" | "chatting" | "topping-up" | "closing";
 type WalletStatus = "created" | "restored" | null;
 
 const STARTUP_HINT =
-  "Type /wtf for the protocol tour, /help for commands, or /open to start a session.\n";
+  "Type /tour for the protocol tour, /help for commands, or /open to start a session.\n";
 const MOBILE_COMMANDS: TerminalCommand[] = [
-  { command: "/wtf", label: "WTF" },
+  { command: "/tour", label: "Tour" },
   { command: "/help", label: "Help" },
   { command: "/open", label: "Open" },
   { command: "/balance", label: "Balance" },
@@ -632,13 +632,13 @@ function App() {
           addLine("system", "  /topup   — Add more credits to the session");
           addLine("system", "  /balance — Show session balance");
           addLine("system", "  /clear   — Reset the terminal log");
-          addLine("system", "  /wtf     — Explain what this demo is actually doing");
+          addLine("system", "  /tour    — Explain what this demo is actually doing");
           addLine("system", "  /github  — View project source on GitHub");
           addLine("system", "  /help    — Show this help");
           addLine("system", "  (text)   — Send a chat message");
           addLine(
             "system",
-            "\nSuggested next step: /wtf for the tour, or /open to watch it happen.",
+            "\nSuggested next step: /tour for the tour, or /open to watch it happen.",
           );
           break;
 
@@ -677,8 +677,8 @@ function App() {
           clearTerminalLog();
           break;
 
-        case "/wtf":
-          await streamMarkdownNarration(renderMarkdownForTerminal(wtfMarkdown));
+        case "/tour":
+          await streamMarkdownNarration(renderMarkdownForTerminal(tourMarkdown));
           addLine(
             "system",
             "\nSuggested next step: /open to run the flow live, or /help to see the controls.",

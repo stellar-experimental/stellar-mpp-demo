@@ -1,4 +1,4 @@
-# WTF Is This Demo?
+# The Protocol Tour
 
 This is an **HTTP 402 + MPP + Stellar session terminal**.
 

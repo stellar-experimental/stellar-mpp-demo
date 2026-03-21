@@ -222,7 +222,7 @@ function Terminal({
                 ? "Processing..."
                 : isTouchLayout
                   ? "Message or /open"
-                  : "Type a message, /wtf, /help, or /open"
+                  : "Type a message, /tour, /help, or /open"
             }
             autoFocus
             spellCheck={false}
