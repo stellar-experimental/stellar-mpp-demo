@@ -134,44 +134,71 @@ function App() {
   const deferredBalance = useDeferredValue(balance);
   const deferredStreamingText = useDeferredValue(streamingText);
 
+  // Wallet state ref — updated synchronously each render so callbacks can read
+  // current values without capturing them as closure deps (advanced-use-latest pattern).
+  const walletStateRef = useRef({ walletAddress, walletStatus, walletReady, walletFundingError });
+  walletStateRef.current = { walletAddress, walletStatus, walletReady, walletFundingError };
+
+  // Input value ref — keeps handleSubmit stable across keystrokes (rerender-defer-reads).
+  const inputValueRef = useRef(input);
+  inputValueRef.current = input;
+
   const addLine = useCallback((type: TerminalLine["type"], content: string) => {
     setLines((prev) => [...prev, newLine(type, content)]);
   }, []);
   const addSuccess = useCallback((content: string) => addLine("success", content), [addLine]);
   const addWarning = useCallback((content: string) => addLine("warning", content), [addLine]);
   const addBilling = useCallback((content: string) => addLine("billing", content), [addLine]);
+
+  // Stable [] deps: reads wallet state from ref instead of closure.
+  // Breaks the buildStartupLines → clearTerminalLog → handleCommand → handleSubmit
+  // recreation chain that previously fired on every wallet state update.
   const buildStartupLines = useCallback(
     ({
-      nextWalletAddress = walletAddress,
-      nextWalletStatus = walletStatus,
-      nextWalletReady = walletReady,
-      nextWalletFundingError = walletFundingError,
+      nextWalletAddress,
+      nextWalletStatus,
+      nextWalletReady,
+      nextWalletFundingError,
     }: {
       nextWalletAddress?: string;
       nextWalletStatus?: WalletStatus;
       nextWalletReady?: boolean;
       nextWalletFundingError?: string | null;
     } = {}): TerminalLine[] => {
+      const ws = walletStateRef.current;
+      const addr = nextWalletAddress ?? ws.walletAddress;
+      const status = nextWalletStatus ?? ws.walletStatus;
+      const ready = nextWalletReady ?? ws.walletReady;
+      // Use !== undefined so an explicitly-passed null ("no error") is respected
+      const fundingError =
+        nextWalletFundingError !== undefined ? nextWalletFundingError : ws.walletFundingError;
+
       const startupLines: TerminalLine[] = [
-        newLine("system", "MPP Chat Demo — AI chatbot with pay-per-message via MPP Sessions on Stellar"),
-        newLine("system", "https://mpp.dev | https://github.com/stellar-experimental/stellar-mpp-sdk | https://github.com/stellar-experimental/stellar-mpp-demo"),
+        newLine(
+          "system",
+          "MPP Chat Demo — AI chatbot with pay-per-message via MPP Sessions on Stellar",
+        ),
+        newLine(
+          "system",
+          "https://mpp.dev | https://github.com/stellar-experimental/stellar-mpp-sdk | https://github.com/stellar-experimental/stellar-mpp-demo",
+        ),
         newLine("system", STARTUP_HINT),
       ];
 
-      if (nextWalletAddress && nextWalletStatus) {
-        startupLines.push(newLine("system", `Wallet ${nextWalletStatus}: ${nextWalletAddress}`));
+      if (addr && status) {
+        startupLines.push(newLine("system", `Wallet ${status}: ${addr}`));
         startupLines.push(newLine("system", "Ensuring account is funded..."));
 
-        if (nextWalletReady) {
+        if (ready) {
           startupLines.push(newLine("success", "Wallet ready on testnet."));
-        } else if (nextWalletFundingError) {
-          startupLines.push(newLine("error", nextWalletFundingError));
+        } else if (fundingError) {
+          startupLines.push(newLine("error", fundingError));
         }
       }
 
       return startupLines;
     },
-    [walletAddress, walletFundingError, walletReady, walletStatus],
+    [], // stable — reads from walletStateRef
   );
   const clearTerminalLog = useCallback(() => {
     setStreamingText("");
@@ -689,7 +716,9 @@ function App() {
   }, [channelId, addWarning, handleClose]);
 
   const handleSubmit = useCallback(async () => {
-    const text = input.trim();
+    // Read current input from ref — removes `input` from deps so this callback
+    // stays stable across keystrokes instead of being recreated on every change.
+    const text = inputValueRef.current.trim();
     if (!text) return;
     setInput("");
     addLine("user", text);
@@ -699,7 +728,7 @@ function App() {
     } else {
       await handleChat(text);
     }
-  }, [input, addLine, handleCommand, handleChat]);
+  }, [addLine, handleCommand, handleChat]);
 
   const handleQuickCommand = useCallback(
     async (command: string) => {

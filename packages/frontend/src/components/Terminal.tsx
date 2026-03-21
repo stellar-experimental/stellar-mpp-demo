@@ -1,4 +1,4 @@
-import { memo, useRef, useEffect, useState, type ReactNode } from "react";
+import { memo, useRef, useEffect, useSyncExternalStore, type ReactNode } from "react";
 
 export interface TerminalLine {
   id: number;
@@ -14,12 +14,48 @@ export interface TerminalCommand {
 const URL_RE = /(https?:\/\/[^\s]+)/;
 const BOTTOM_THRESHOLD_PX = 24;
 
+// Module-level media query helpers — stable references, no recreation per render
+const TOUCH_BREAKPOINT = "(max-width: 900px)";
+function subscribeToTouchLayout(callback: () => void) {
+  const mq = window.matchMedia(TOUCH_BREAKPOINT);
+  mq.addEventListener("change", callback);
+  return () => mq.removeEventListener("change", callback);
+}
+function getTouchLayoutSnapshot() {
+  return window.matchMedia(TOUCH_BREAKPOINT).matches;
+}
+function getTouchLayoutServerSnapshot() {
+  return false;
+}
+
 function isNearBottom(element: HTMLDivElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_THRESHOLD_PX;
 }
 
+// Hoisted out of component — pure function, no need to recreate each render
+function colorClass(type: TerminalLine["type"]): string {
+  switch (type) {
+    case "system":
+      return "text-neutral-300";
+    case "user":
+      return "text-cyan-300";
+    case "ai":
+      return "text-neutral-100";
+    case "error":
+      return "text-red-300";
+    case "success":
+      return "text-emerald-300";
+    case "warning":
+      return "text-amber-300";
+    case "billing":
+      return "text-violet-300";
+  }
+}
+
 function linkify(text: string): ReactNode {
-  const parts = text.split(new RegExp(URL_RE.source, "g"));
+  // URL_RE already has a capturing group — split preserves matches in the result array.
+  // Avoid `new RegExp(URL_RE.source, "g")`: the /g flag gives RegExp mutable lastIndex state.
+  const parts = text.split(URL_RE);
   if (parts.length === 1) return text;
   return parts.map((part, i) =>
     URL_RE.test(part) ? (
@@ -71,17 +107,13 @@ function Terminal({
   const inputRef = useRef<HTMLInputElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const previousLastLineRef = useRef<TerminalLine | null>(null);
-  const [isTouchLayout, setIsTouchLayout] = useState(false);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const media = window.matchMedia("(max-width: 900px)");
-    const sync = () => setIsTouchLayout(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
+  // useSyncExternalStore: correct for SSR, no useState+useEffect round-trip
+  const isTouchLayout = useSyncExternalStore(
+    subscribeToTouchLayout,
+    getTouchLayoutSnapshot,
+    getTouchLayoutServerSnapshot,
+  );
 
   useEffect(() => {
     const lastLine = lines.at(-1) ?? null;
@@ -107,25 +139,6 @@ function Terminal({
   useEffect(() => {
     inputRef.current?.focus();
   }, [disabled]);
-
-  const colorClass = (type: TerminalLine["type"]) => {
-    switch (type) {
-      case "system":
-        return "text-neutral-300";
-      case "user":
-        return "text-cyan-300";
-      case "ai":
-        return "text-neutral-100";
-      case "error":
-        return "text-red-300";
-      case "success":
-        return "text-emerald-300";
-      case "warning":
-        return "text-amber-300";
-      case "billing":
-        return "text-violet-300";
-    }
-  };
 
   return (
     <>
