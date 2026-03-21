@@ -1,7 +1,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
 
-const SITE_URL = "https://mpp.dev";
+const SITE_URL = "https://mpp.stellar.buzz";
 const SITE_TITLE = "MPP Chat Demo";
 const SITE_DESCRIPTION =
   "A live demo of pay-per-message AI chat powered by MPP micropayment sessions on the Stellar blockchain. Open a session, chat with an AI, and settle on-chain — no subscriptions.";
