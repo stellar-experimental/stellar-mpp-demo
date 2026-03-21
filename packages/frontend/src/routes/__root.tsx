@@ -20,14 +20,14 @@ export const Route = createRootRoute({
       { property: "og:site_name", content: SITE_TITLE },
       { property: "og:title", content: SITE_TITLE },
       { property: "og:description", content: SITE_DESCRIPTION },
-      { property: "og:image", content: `${SITE_URL}/meta.png` },
+      { property: "og:image", content: `${SITE_URL}/meta.jpg` },
       { property: "og:image:width", content: "1200" },
       { property: "og:image:height", content: "630" },
       // Twitter Card
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: SITE_TITLE },
       { name: "twitter:description", content: SITE_DESCRIPTION },
-      { name: "twitter:image", content: `${SITE_URL}/meta.png` },
+      { name: "twitter:image", content: `${SITE_URL}/meta.jpg` },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
